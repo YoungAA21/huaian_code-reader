@@ -150,7 +150,7 @@ yarn preview
 ```javascript
 {
     type: "devices",
-        arguments: [{
+        arguments [{
         device: "设备IP",
         deviceName: "设备名称",
         lineName: "产线名称",
@@ -167,7 +167,7 @@ yarn preview
 ```javascript
 {
     type: "records",
-        arguments: [{
+        arguments [{
         device: "设备IP",
         deviceName: "设备名称",
         triggerIndex: 0,
@@ -182,7 +182,7 @@ yarn preview
 ```javascript
 {
     type: "alarms",
-        arguments: [{
+        arguments [{
         device: "设备IP",
         alarmType: "告警类型",
         message: "告警信息",
