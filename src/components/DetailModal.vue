@@ -1,4 +1,3 @@
-<!-- DetailModal.vue - 弹窗优化 -->
 <template>
   <div v-if="detector" class="modal-overlay" @click="$emit('close')">
     <div class="modal-container" @click.stop>
@@ -44,7 +43,7 @@
           </div>
           <div class="info-row">
             <span class="info-label">最后心跳</span>
-            <span class="info-value">{{ detector.lastHeartbeat || '--' }}</span>
+            <span class="info-value">{{ formatHeartbeat(detector.lastHeartbeat) }}</span>
           </div>
           <div class="info-row">
             <span class="info-label">触发次数</span>
@@ -88,7 +87,15 @@ import { computed } from 'vue'
 const props = defineProps<{ detector: any | null }>()
 defineEmits<{ close: [] }>()
 
-const TEMP_THRESHOLD = { warning: 45, danger: 60 }
+// 获取设备的自定义温度阈值，如果没有则使用全局默认值
+const getTempThreshold = (detector: any) => {
+  return detector.customTempThreshold || { warning: 45, danger: 60 }
+}
+
+// 获取设备的自定义耗时阈值，如果没有则使用全局默认值
+const getValueThreshold = (detector: any) => {
+  return detector.customThreshold || { warning: 70, danger: 90 }
+}
 
 const getStatusClass = computed(() => {
   if (!props.detector) return ''
@@ -102,18 +109,58 @@ const getStatusClass = computed(() => {
 const getValueClass = computed(() => {
   if (!props.detector) return ''
   const val = props.detector.displayValue
-  if (val >= 90) return 'danger'
-  if (val >= 70) return 'warning'
+  const threshold = getValueThreshold(props.detector)
+  if (val >= threshold.danger) return 'danger'
+  if (val >= threshold.warning) return 'warning'
   return ''
 })
 
 const getTempClass = computed(() => {
   if (!props.detector) return ''
   const temp = props.detector.temperature || 0
-  if (temp >= TEMP_THRESHOLD.danger) return 'danger'
-  if (temp >= TEMP_THRESHOLD.warning) return 'warning'
+  const threshold = getTempThreshold(props.detector)
+  if (temp >= threshold.danger) return 'danger'
+  if (temp >= threshold.warning) return 'warning'
   return ''
 })
+
+// 格式化心跳时间
+const formatHeartbeat = (heartbeat: string | undefined) => {
+  if (!heartbeat) return '--'
+
+  try {
+    // 尝试解析时间戳
+    let date: Date
+
+    // 如果是数字字符串（时间戳）
+    if (/^\d+$/.test(heartbeat)) {
+      const timestamp = parseInt(heartbeat)
+      // 判断是秒还是毫秒（13位是毫秒，10位是秒）
+      date = timestamp > 9999999999 ? new Date(timestamp) : new Date(timestamp * 1000)
+    } else {
+      // 尝试直接解析日期字符串
+      date = new Date(heartbeat)
+    }
+
+    // 检查是否是有效日期
+    if (isNaN(date.getTime())) {
+      return heartbeat
+    }
+
+    // 格式化为本地时间字符串
+    return date.toLocaleString('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    })
+  } catch (error) {
+    return heartbeat
+  }
+}
 </script>
 
 <style scoped>
