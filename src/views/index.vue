@@ -1,11 +1,6 @@
+<!-- index.vue - 主页面优化 -->
 <template>
   <div class="digital-tower">
-    <!-- 背景装饰 -->
-    <div class="bg-decoration">
-      <div class="grid-lines"></div>
-      <div class="radar-scan"></div>
-    </div>
-
     <!-- 顶部：标题栏 + KPI 卡片 -->
     <HeaderSection
         :current-time="currentTime"
@@ -18,23 +13,23 @@
     <div v-for="(lineDetectors, lineName) in groupedDetectors" :key="lineName" class="line-section">
       <div class="line-header">
         <div class="line-title">
-          <span class="line-icon"></span>
+          <span class="line-indicator"></span>
           <h2>{{ lineName }}</h2>
-          <span class="line-count">{{ lineDetectors.length }}台设备</span>
+          <span class="line-badge">{{ lineDetectors.length }}台</span>
         </div>
         <div class="line-stats">
-          <span class="online">在线: {{ getLineOnlineCount(lineDetectors) }}</span>
-          <span class="warning">警告: {{ getLineWarningCount(lineDetectors) }}</span>
-          <span class="danger">危险: {{ getLineDangerCount(lineDetectors) }}</span>
-          <span class="avg">均值: {{ getLineAvgValue(lineDetectors).toFixed(1) }}</span>
+          <span class="stat-online">● 在线 {{ getLineOnlineCount(lineDetectors) }}</span>
+          <span class="stat-warning">● 警告 {{ getLineWarningCount(lineDetectors) }}</span>
+          <span class="stat-danger">● 危险 {{ getLineDangerCount(lineDetectors) }}</span>
+          <span class="stat-avg">均值 {{ getLineAvgValue(lineDetectors).toFixed(1) }}</span>
         </div>
       </div>
 
-      <!-- 检测器网格 -->
       <DetectorGrid
           :detectors="lineDetectors"
           :threshold="THRESHOLD"
           @open-detail="openDetail"
+          @config-threshold="openThresholdConfig"
       />
     </div>
 
@@ -42,62 +37,18 @@
     <AlarmBar :alarms="latestAlarms" @clear="clearAllAlarms" />
 
     <!-- 详情弹窗 -->
-    <div v-if="selectedDetector" class="modal-overlay" @click="closeDetail">
-      <div class="modal-content" @click.stop>
-        <div class="modal-header">
-          <h3>{{ selectedDetector.name }} 详细数据</h3>
-          <button class="close-btn" @click="closeDetail">×</button>
-        </div>
-        <div class="modal-body">
-          <div class="detail-value">
-            <div class="current-value">
-              <span class="label">设备状态</span>
-              <span class="value" :class="getDetailStatusClass(selectedDetector)">
-                {{ selectedDetector.status || 'UNKNOWN' }}
-              </span>
-            </div>
-            <div class="stats-row">
-              <div><span>设备IP</span><strong>{{ selectedDetector.device }}</strong></div>
-              <div><span>产线</span><strong>{{ selectedDetector.lineName }}</strong></div>
-              <div><span>工位</span><strong>{{ selectedDetector.stationName }}</strong></div>
-              <div><span>最后心跳</span><strong>{{ selectedDetector.lastHeartbeat || '--' }}</strong></div>
-            </div>
-          </div>
+    <DetailModal
+        :detector="selectedDetector"
+        @close="closeDetail"
+    />
 
-          <!-- 关键参数区域 -->
-          <div class="detail-params" v-if="selectedDetector.lastTriggerIndex !== undefined || selectedDetector.lastTotalTime !== undefined">
-            <div class="params-title">关键参数</div>
-            <div class="params-grid">
-              <div class="param-card" v-if="selectedDetector.lastTriggerIndex !== undefined">
-                <div class="param-label">触发次数</div>
-                <div class="param-value">{{ selectedDetector.lastTriggerIndex || 0 }}</div>
-                <div class="param-unit">次</div>
-              </div>
-              <div class="param-card" v-if="selectedDetector.lastTotalTime !== undefined">
-                <div class="param-label">累计时间</div>
-                <div class="param-value">{{ selectedDetector.lastTotalTime || 0 }}</div>
-                <div class="param-unit">秒</div>
-              </div>
-              <div class="param-card" v-if="selectedDetector.lastCode">
-                <div class="param-label">最新码</div>
-                <div class="param-value small">{{ selectedDetector.lastCode }}</div>
-              </div>
-            </div>
-          </div>
-
-          <div class="detail-alarms">
-            <h4>报警记录</h4>
-            <div class="alarm-list">
-              <div v-for="alarm in selectedDetector.alarms.slice(0, 5)" :key="alarm.id" class="alarm-item" :class="alarm.level">
-                <span class="time">{{ alarm.time }}</span>
-                <span class="msg">{{ alarm.message }}</span>
-              </div>
-              <div v-if="selectedDetector.alarms.length === 0" class="empty">暂无报警</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+    <!-- 在 DetailModal 后面添加 -->
+    <ThresholdConfig
+        :visible="thresholdConfigVisible"
+        :detector="configTargetDetector"
+        @close="closeThresholdConfig"
+        @save="saveThresholdConfig"
+    />
   </div>
 </template>
 
@@ -108,6 +59,9 @@ import type { ConnectionStatus } from '../types/detection'
 import HeaderSection from '../components/HeaderSection.vue'
 import DetectorGrid from '../components/DetectorGrid.vue'
 import AlarmBar from '../components/AlarmBar.vue'
+import DetailModal from '../components/DetailModal.vue'
+import ThresholdConfig from '../components/ThresholdConfig.vue'
+import type { ThresholdConfig as ThresholdConfigType } from '../components/ThresholdConfig.vue'
 
 // ==================== 配置 ====================
 const THRESHOLD = { warning: 70, danger: 90 }
@@ -115,20 +69,15 @@ const HUB_URL = import.meta.env.VITE_SIGNALR_HUB_URL || '/hubs/device'
 const MAX_TREND_POINTS = 30
 const THROTTLE_MS = 100
 
-// ==================== 状态配置 ====================
-// 状态映射
+// ==================== 状态映射 ====================
 const STATUS_CONFIG = {
   OK: { text: '正常', type: 'online', color: '#00ff88', level: 'normal' },
   NO_READ: { text: '心跳异常', type: 'offline', color: '#ffaa00', level: 'warning' },
   OFFLINE: { text: '离线', type: 'offline', color: '#666', level: 'offline' }
 }
 
-// 判断设备是否在线（用于统计）
-const isDeviceOnline = (status: string): boolean => {
-  return status === 'OK'
-}
+const isDeviceOnline = (status: string): boolean => status === 'OK'
 
-// 获取设备状态文本
 const getDeviceStatusText = (status: string): string => {
   const config = STATUS_CONFIG[status as keyof typeof STATUS_CONFIG]
   return config?.text || status
@@ -140,33 +89,35 @@ const currentDate = ref('')
 const detectors = ref<any[]>([])
 const selectedDetector = ref<any>(null)
 const latestAlarms = ref<any[]>([])
-const detailCanvas = ref<HTMLCanvasElement | null>(null)
+// 阈值配置相关
+const thresholdConfigVisible = ref(false)
+const configTargetDetector = ref<any>(null)
 
-// ==================== 计算属性：按产线分组 ====================
+// ==================== 计算属性 ====================
 const groupedDetectors = computed(() => {
   const groups: Record<string, any[]> = {}
   detectors.value.forEach(detector => {
     const lineName = detector.lineName || '未分组'
-    if (!groups[lineName]) {
-      groups[lineName] = []
-    }
+    if (!groups[lineName]) groups[lineName] = []
     groups[lineName].push(detector)
   })
   return groups
 })
 
-// 产线统计函数
-const getLineOnlineCount = (lineDetectors: any[]) => {
-  return lineDetectors.filter(d => d.isConnected).length
-}
+const getLineOnlineCount = (lineDetectors: any[]) =>
+    lineDetectors.filter(d => d.isConnected).length
 
-const getLineWarningCount = (lineDetectors: any[]) => {
-  return lineDetectors.filter(d => d.displayValue >= THRESHOLD.warning && d.displayValue < THRESHOLD.danger).length
-}
+const getLineWarningCount = (lineDetectors: any[]) =>
+    lineDetectors.filter(d => {
+      const threshold = d.customThreshold || THRESHOLD
+      return d.displayValue >= threshold.warning && d.displayValue < threshold.danger
+    }).length
 
-const getLineDangerCount = (lineDetectors: any[]) => {
-  return lineDetectors.filter(d => d.displayValue >= THRESHOLD.danger).length
-}
+const getLineDangerCount = (lineDetectors: any[]) =>
+    lineDetectors.filter(d => {
+      const threshold = d.customThreshold || THRESHOLD
+      return d.displayValue >= threshold.danger
+    }).length
 
 const getLineAvgValue = (lineDetectors: any[]) => {
   if (lineDetectors.length === 0) return 0
@@ -181,7 +132,6 @@ const formatTime = () => {
   currentDate.value = now.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit', weekday: 'short' })
 }
 
-// 更新检测器列表
 const updateDetectorsFromData = (devices: any[]) => {
   if (!devices || !devices.length) return
 
@@ -191,10 +141,9 @@ const updateDetectorsFromData = (devices: any[]) => {
     const now = Date.now()
     const value = device.lastTotalTime || 0
     const status = device.status || 'OFFLINE'
-    const isOnline = isDeviceOnline(status)  // ✅ 只有 OK 才算在线
+    const isOnline = isDeviceOnline(status)
 
     if (existingDetector) {
-      // 更新现有检测器
       if (now - existingDetector.lastRenderTime >= THROTTLE_MS) {
         existingDetector.lastRenderTime = now
         existingDetector.displayValue = value
@@ -207,6 +156,7 @@ const updateDetectorsFromData = (devices: any[]) => {
         existingDetector.lastTriggerIndex = device.lastTriggerIndex || 0
         existingDetector.lastTotalTime = device.lastTotalTime || 0
         existingDetector.lastCode = device.lastCode || ''
+        existingDetector.temperature = device.temperature || 0
         existingDetector.lastUpdateTime = new Date().toLocaleTimeString()
 
         if (existingDetector.lastValue !== 0) {
@@ -216,7 +166,6 @@ const updateDetectorsFromData = (devices: any[]) => {
         existingDetector.lastValue = value
       }
 
-      // ✅ 根据状态设置连接状态（只有 OK 才算在线）
       existingDetector.isConnected = isOnline
       existingDetector.valueBuffer.push(value)
 
@@ -224,11 +173,8 @@ const updateDetectorsFromData = (devices: any[]) => {
       if (value < existingDetector.minValue) existingDetector.minValue = value
 
       existingDetector.trendData.push(value)
-      if (existingDetector.trendData.length > MAX_TREND_POINTS) {
-        existingDetector.trendData.shift()
-      }
+      if (existingDetector.trendData.length > MAX_TREND_POINTS) existingDetector.trendData.shift()
 
-      // ✅ 检查报警（状态变化时报警）
       const previousOnline = existingDetector.wasOnline
       if (isOnline !== previousOnline) {
         if (!isOnline) {
@@ -240,9 +186,16 @@ const updateDetectorsFromData = (devices: any[]) => {
         existingDetector.wasOnline = isOnline
       }
 
+      const currentTemp = device.temperature || 0
+      const lastTempWarning = existingDetector.lastTempWarning || false
+      if (currentTemp >= 60 && !lastTempWarning) {
+        addAlarm(deviceId, 'danger', `设备 ${device.deviceName || device.device} 温度过高: ${currentTemp.toFixed(1)}°C`, value)
+        existingDetector.lastTempWarning = true
+      } else if (currentTemp < 60 && lastTempWarning) {
+        existingDetector.lastTempWarning = false
+      }
     } else {
-      // 新增检测器
-      detectors.value.push({
+      const newDetector = {
         id: deviceId,
         name: device.deviceName || device.device,
         device: device.device,
@@ -254,6 +207,7 @@ const updateDetectorsFromData = (devices: any[]) => {
         lastTriggerIndex: device.lastTriggerIndex || 0,
         lastTotalTime: device.lastTotalTime || 0,
         lastCode: device.lastCode || '',
+        temperature: device.temperature || 0,
         displayValue: value,
         lastUpdateTime: new Date().toLocaleTimeString(),
         lastValue: value,
@@ -264,16 +218,18 @@ const updateDetectorsFromData = (devices: any[]) => {
         avgValue: value,
         isConnected: isOnline,
         wasOnline: isOnline,
+        lastTempWarning: false,
         alarms: [],
         trendData: [value],
         valueBuffer: [value],
         lastRenderTime: now
-      })
+      }
+      loadThresholdFromLocal(newDetector)
+      detectors.value.push(newDetector)
     }
   })
 }
 
-// 更新统计信息
 const updateStatistics = () => {
   detectors.value.forEach(detector => {
     if (detector.valueBuffer.length > 0) {
@@ -284,15 +240,12 @@ const updateStatistics = () => {
   })
 }
 
-// 报警
 const addAlarm = (detectorId: string, level: string, message: string, value: number) => {
   const detector = detectors.value.find(d => d.id === detectorId)
   if (!detector) return
 
   const lastAlarm = detector.alarms[0]
-  if (lastAlarm && (Date.now() - lastAlarm.timestamp) < 30000 && lastAlarm.message === message) {
-    return
-  }
+  if (lastAlarm && (Date.now() - lastAlarm.timestamp) < 30000 && lastAlarm.message === message) return
 
   const time = new Date().toLocaleTimeString()
   const alarm = {
@@ -312,15 +265,12 @@ const addAlarm = (detectorId: string, level: string, message: string, value: num
 
 const clearAllAlarms = () => { latestAlarms.value = [] }
 
-// 处理检测记录数据（records）
 const updateRecordsFromData = (records: any[]) => {
   if (!records || !records.length) return
 
   records.forEach((record: any) => {
     let deviceId = record.device
-    if (deviceId && deviceId.includes(':')) {
-      deviceId = deviceId.split(':')[0]
-    }
+    if (deviceId && deviceId.includes(':')) deviceId = deviceId.split(':')[0]
 
     const existingDetector = detectors.value.find(d => d.id === deviceId)
 
@@ -328,17 +278,15 @@ const updateRecordsFromData = (records: any[]) => {
       const now = Date.now()
       const value = record.totalTime || 0
       const status = record.status || 'OK'
-      const isOnline = isDeviceOnline(status)  // ✅ 只有 OK 才算在线
+      const isOnline = isDeviceOnline(status)
 
-      // 更新关键参数
       existingDetector.lastTriggerIndex = record.triggerIndex
       existingDetector.lastTotalTime = record.totalTime
       existingDetector.lastCode = record.code
       existingDetector.status = status
       existingDetector.statusText = getDeviceStatusText(status)
       existingDetector.stationName = record.stationName || existingDetector.stationName
-
-      // 每次都更新显示数值
+      existingDetector.temperature = record.temperature || existingDetector.temperature || 0
       existingDetector.displayValue = value
 
       if (now - existingDetector.lastRenderTime >= THROTTLE_MS) {
@@ -358,15 +306,11 @@ const updateRecordsFromData = (records: any[]) => {
       if (value < existingDetector.minValue) existingDetector.minValue = value
 
       existingDetector.trendData.push(value)
-      if (existingDetector.trendData.length > MAX_TREND_POINTS) {
-        existingDetector.trendData.shift()
-      }
+      if (existingDetector.trendData.length > MAX_TREND_POINTS) existingDetector.trendData.shift()
 
-      // ✅ 更新连接状态
       const previousOnline = existingDetector.isConnected
       existingDetector.isConnected = isOnline
 
-      // 状态变化报警
       if (isOnline !== previousOnline) {
         if (!isOnline) {
           const alarmMsg = status === 'NO_READ' ? '心跳异常' : '离线'
@@ -377,15 +321,21 @@ const updateRecordsFromData = (records: any[]) => {
         existingDetector.wasOnline = isOnline
       }
 
+      const currentTemp = record.temperature || existingDetector.temperature || 0
+      const lastTempWarning = existingDetector.lastTempWarning || false
+      if (currentTemp >= 60 && !lastTempWarning) {
+        addAlarm(deviceId, 'danger', `设备 ${existingDetector.name} 温度过高: ${currentTemp.toFixed(1)}°C`, value)
+        existingDetector.lastTempWarning = true
+      } else if (currentTemp < 60 && lastTempWarning) {
+        existingDetector.lastTempWarning = false
+      }
     } else {
-      // 新增检测器
-      console.log('发现新设备:', deviceId)
       const now = Date.now()
       const value = record.totalTime || 0
       const status = record.status || 'OK'
       const isOnline = isDeviceOnline(status)
 
-      detectors.value.push({
+      const newDetector = {
         id: deviceId,
         name: record.deviceName || `设备 ${deviceId}`,
         device: deviceId,
@@ -397,6 +347,7 @@ const updateRecordsFromData = (records: any[]) => {
         lastTriggerIndex: record.triggerIndex,
         lastTotalTime: record.totalTime,
         lastCode: record.code,
+        temperature: record.temperature || 0,
         displayValue: value,
         lastUpdateTime: new Date().toLocaleTimeString(),
         lastValue: value,
@@ -407,24 +358,24 @@ const updateRecordsFromData = (records: any[]) => {
         avgValue: value,
         isConnected: isOnline,
         wasOnline: isOnline,
+        lastTempWarning: false,
         alarms: [],
         trendData: [value],
         valueBuffer: [value],
         lastRenderTime: now
-      })
+      }
+      loadThresholdFromLocal(newDetector)
+      detectors.value.push(newDetector)
     }
   })
 }
 
-// 处理报警数据（alarms）
 const updateAlarmsFromData = (alarms: any[]) => {
   if (!alarms || !alarms.length) return
 
   alarms.forEach((alarm: any) => {
     let deviceId = alarm.device
-    if (deviceId && deviceId.includes(':')) {
-      deviceId = deviceId.split(':')[0]
-    }
+    if (deviceId && deviceId.includes(':')) deviceId = deviceId.split(':')[0]
 
     const detector = detectors.value.find(d => d.id === deviceId)
     const detectorName = detector?.name || alarm.device
@@ -448,15 +399,11 @@ const updateAlarmsFromData = (alarms: any[]) => {
       if (detector.alarms.length > 50) detector.alarms.pop()
       detector.status = 'WARNING'
     }
-
-    console.log(`报警: ${alarm.alarmType} - ${alarm.message}`)
   })
 }
 
 // ==================== SignalR 数据处理 ====================
 const handleDetectionData = (data: any) => {
-  console.log('收到 SignalR 数据:', data)
-
   try {
     if (data.type !== undefined && data.target && data.arguments) {
       const target = data.target
@@ -464,22 +411,13 @@ const handleDetectionData = (data: any) => {
 
       switch (target) {
         case 'devices':
-          if (Array.isArray(args)) {
-            console.log('收到设备状态数据，数量:', args.length)
-            updateDetectorsFromData(args)
-          }
+          if (Array.isArray(args)) updateDetectorsFromData(args)
           break
         case 'records':
-          if (Array.isArray(args)) {
-            console.log('收到检测记录数据，数量:', args.length)
-            updateRecordsFromData(args)
-          }
+          if (Array.isArray(args)) updateRecordsFromData(args)
           break
         case 'alarms':
-          if (Array.isArray(args)) {
-            console.log('收到报警数据，数量:', args.length)
-            updateAlarmsFromData(args)
-          }
+          if (Array.isArray(args)) updateAlarmsFromData(args)
           break
         default:
           console.log('未知的 target 类型:', target)
@@ -496,9 +434,7 @@ const handleDetectionData = (data: any) => {
   }
 }
 
-// 连接状态变化处理
 const handleStatusChange = (status: ConnectionStatus) => {
-  console.log('SignalR 连接状态:', status)
   if (!status.isConnected) {
     detectors.value.forEach(d => {
       d.isConnected = false
@@ -510,68 +446,65 @@ const handleStatusChange = (status: ConnectionStatus) => {
   }
 }
 
-// 初始化 SignalR 连接
 const initSignalR = async () => {
   try {
     signalRService.buildConnection(HUB_URL, {})
-
-    // 监听三个不同的事件
     signalRService.on('devices', handleDetectionData)
-    // signalRService.on('records', handleDetectionData)
-    // signalRService.on('alarms', handleDetectionData)
-
     signalRService.onStatusChange(handleStatusChange)
-
     await signalRService.start()
-    console.log('SignalR 连接成功，已监听 devices, records, alarms 事件')
+    console.log('SignalR 连接成功')
   } catch (e) {
     console.error('SignalR 连接失败:', e)
   }
 }
 
-// 弹窗
-const openDetail = (detector: any) => {
-  selectedDetector.value = detector
-  setTimeout(() => {
-    if (detailCanvas.value && detector.trendData.length) {
-      const canvas = detailCanvas.value
-      canvas.width = canvas.clientWidth
-      canvas.height = canvas.clientHeight
-      const ctx = canvas.getContext('2d')
-      if (!ctx) return
-
-      ctx.clearRect(0, 0, canvas.width, canvas.height)
-
-      if (detector.trendData.length < 2) return
-
-      const stepX = canvas.width / MAX_TREND_POINTS
-      const startX = canvas.width - (detector.trendData.length * stepX)
-
-      ctx.beginPath()
-      if (detector.status === 'DANGER') ctx.strokeStyle = '#ff4444'
-      else if (detector.status === 'WARNING') ctx.strokeStyle = '#ffaa00'
-      else if (detector.status === 'ONLINE') ctx.strokeStyle = '#00ff88'
-      else ctx.strokeStyle = '#666'
-      ctx.lineWidth = 2
-
-      detector.trendData.forEach((val: number, i: number) => {
-        const x = startX + i * stepX
-        const y = canvas.height - (Math.min(Math.max(val, 0), 100) / 100) * canvas.height
-        if (i === 0) ctx.moveTo(x, y)
-        else ctx.lineTo(x, y)
-      })
-      ctx.stroke()
-    }
-  }, 50)
-}
-
+const openDetail = (detector: any) => { selectedDetector.value = detector }
 const closeDetail = () => { selectedDetector.value = null }
 
-const getDetailStatusClass = (d: any) => {
-  if (d.status === 'DANGER') return 'danger'
-  if (d.status === 'WARNING') return 'warning'
-  if (d.status === 'ONLINE') return 'normal'
-  return 'offline'
+const openThresholdConfig = (detector: any) => {
+  configTargetDetector.value = detector
+  thresholdConfigVisible.value = true
+}
+
+const closeThresholdConfig = () => {
+  thresholdConfigVisible.value = false
+  configTargetDetector.value = null
+}
+
+const saveThresholdConfig = (detectorId: string, config: ThresholdConfigType) => {
+  const detector = detectors.value.find(d => d.id === detectorId)
+  if (detector) {
+    // 保存自定义阈值
+    detector.customThreshold = {
+      warning: config.warning,
+      danger: config.danger
+    }
+    detector.customTempThreshold = {
+      warning: config.tempWarning,
+      danger: config.tempDanger
+    }
+
+    // 保存到 localStorage
+    const allConfigs = JSON.parse(localStorage.getItem('device_thresholds') || '{}')
+    allConfigs[detectorId] = config
+    localStorage.setItem('device_thresholds', JSON.stringify(allConfigs))
+  }
+}
+
+// 加载保存的阈值配置
+const loadThresholdFromLocal = (detector: any) => {
+  const allConfigs = JSON.parse(localStorage.getItem('device_thresholds') || '{}')
+  const saved = allConfigs[detector.id]
+  if (saved) {
+    detector.customThreshold = {
+      warning: saved.warning,
+      danger: saved.danger
+    }
+    detector.customTempThreshold = {
+      warning: saved.tempWarning,
+      danger: saved.tempDanger
+    }
+  }
 }
 
 // 生命周期
@@ -586,11 +519,77 @@ onMounted(async () => {
 onUnmounted(() => {
   clearInterval(statsInterval)
   signalRService.off('devices', handleDetectionData)
-  signalRService.off('records', handleDetectionData)
-  signalRService.off('alarms', handleDetectionData)
   signalRService.stop()
 })
 </script>
+
+<!-- index.vue - 添加全局主题变量 -->
+<style>
+/* ==================== 全局主题变量 ==================== */
+/* 亮色模式（默认） */
+:root {
+  --bg-primary: #f5f7fa;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #e8ecef;
+  --bg-card: #ffffff;
+  --text-primary: #1a2a3a;
+  --text-secondary: #6c7a8a;
+  --text-muted: #9aaebf;
+  --text-inverse: #ffffff;
+  --border-light: #e0e4e8;
+  --border-medium: #cbd5e0;
+  --border-heavy: #adb5bd;
+  --success: #2d6a4f;
+  --success-light: #52b788;
+  --warning: #e6a017;
+  --warning-light: #ffc107;
+  --danger: #dc3545;
+  --danger-light: #ff6b6b;
+  --info: #4a90e2;
+  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --transition: all 0.2s ease;
+}
+
+/* 暗色模式 */
+.dark-theme {
+  --bg-primary: #0f1419;
+  --bg-secondary: #1a222a;
+  --bg-tertiary: #1e252d;
+  --bg-card: #1a222a;
+  --text-primary: #e0e4e8;
+  --text-secondary: #9aaebf;
+  --text-muted: #6c7a8a;
+  --text-inverse: #1a2a3a;
+  --border-light: #2a343c;
+  --border-medium: #3a4550;
+  --border-heavy: #4a5560;
+  --success: #52b788;
+  --success-light: #2d6a4f;
+  --warning: #ffc107;
+  --warning-light: #e6a017;
+  --danger: #ff6b6b;
+  --danger-light: #dc3545;
+  --info: #5a9ef0;
+  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg-primary);
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+</style>
 
 <style scoped>
 .digital-tower {
@@ -601,176 +600,102 @@ onUnmounted(() => {
   bottom: 0;
   width: 100vw;
   height: 100vh;
-  background: radial-gradient(ellipse at 20% 30%, #0a0f1a, #05080f);
-  padding: 24px 36px;
-  font-family: 'Poppins', 'Segoe UI', monospace;
-  color: #e0e0e0;
+  background: var(--bg-primary);
+  padding: 24px 32px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+  color: var(--text-primary);
   overflow-y: auto;
   box-sizing: border-box;
-  font-size: 16px;
+  font-size: 30px;
 }
 
-.digital-tower::-webkit-scrollbar { width: 8px; background: rgba(0,0,0,0.3); }
-.digital-tower::-webkit-scrollbar-thumb { background: #00ff88; border-radius: 4px; }
+.digital-tower::-webkit-scrollbar {
+  width: 6px;
+  background: var(--border-light);
+  border-radius: 3px;
+}
 
-/* 背景装饰 */
-.bg-decoration { position: fixed; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none; z-index: 0; }
-.grid-lines {
-  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
-  background-image: linear-gradient(rgba(0,255,136,0.05) 1px, transparent 1px),
-  linear-gradient(90deg, rgba(0,255,136,0.05) 1px, transparent 1px);
-  background-size: 40px 40px;
+.digital-tower::-webkit-scrollbar-thumb {
+  background: var(--text-muted);
+  border-radius: 3px;
 }
-.radar-scan {
-  position: absolute; top: 20%; right: 5%; width: 300px; height: 300px; border-radius: 50%;
-  background: radial-gradient(circle, rgba(0,255,136,0.03) 0%, transparent 70%);
-  animation: radarRotate 20s linear infinite;
+
+.digital-tower::-webkit-scrollbar-thumb:hover {
+  background: var(--border-heavy);
 }
-@keyframes radarRotate { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
 /* 产线分区 */
 .line-section {
-  margin-bottom: 48px;
+  margin-bottom: 40px;
 }
 
 .line-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  margin-bottom: 24px;
-  padding: 0 8px;
+  align-items: baseline;
+  margin-bottom: 20px;
+  padding: 0 4px;
 }
 
 .line-title {
   display: flex;
-  align-items: center;
-  gap: 14px;
+  align-items: baseline;
+  gap: 12px;
 }
 
-.line-icon {
-  width: 5px;
-  height: 28px;
-  background: linear-gradient(180deg, #00ff88, #00aa55);
-  border-radius: 3px;
+.line-indicator {
+  width: 4px;
+  height: 22px;
+  background: var(--success);
+  border-radius: 2px;
 }
 
 .line-title h2 {
-  font-size: 26px;
+  font-size: 30px;
   font-weight: 600;
   margin: 0;
-  color: #fff;
+  color: var(--text-primary);
+  letter-spacing: -0.3px;
 }
 
-.line-count {
-  font-size: 15px;
-  color: #88aabb;
-  background: rgba(0,255,136,0.1);
-  padding: 4px 10px;
-  border-radius: 24px;
+.line-badge {
+  font-size: 20px;
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+  padding: 2px 8px;
+  border-radius: 20px;
 }
 
 .line-stats {
   display: flex;
-  gap: 20px;
-  font-size: 15px;
-}
-
-.line-stats .online { color: #00ff88; }
-.line-stats .warning { color: #ffaa00; }
-.line-stats .danger { color: #ff4444; }
-.line-stats .avg { color: #88aabb; }
-
-/* 弹窗内关键参数 */
-.detail-params {
-  margin-bottom: 28px;
-  padding: 20px;
-  background: rgba(0,0,0,0.3);
-  border-radius: 20px;
-}
-.params-title {
+  gap: 24px;
   font-size: 18px;
-  color: #00ff88;
-  margin-bottom: 20px;
-  padding-left: 10px;
-  border-left: 3px solid #00ff88;
-}
-.params-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 20px;
-}
-.param-card {
-  text-align: center;
-  padding: 16px;
-  background: rgba(0,0,0,0.3);
-  border-radius: 16px;
-}
-.param-label {
-  font-size: 14px;
-  color: #88aabb;
-  margin-bottom: 10px;
-}
-.param-value {
-  font-size: 34px;
-  font-weight: bold;
-  font-family: monospace;
-  color: #fff;
-}
-.param-value.small {
-  font-size: 16px;
-  word-break: break-all;
-}
-.param-unit {
-  font-size: 13px;
-  color: #88aabb;
-  margin-top: 6px;
+  font-weight: 500;
 }
 
-/* 弹窗其他样式 */
-.modal-overlay {
-  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,0.8); backdrop-filter: blur(8px);
-  display: flex; justify-content: center; align-items: center; z-index: 1000;
+.line-stats span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
-.modal-content {
-  background: linear-gradient(135deg, #1a2a2a, #0f1a1a);
-  border-radius: 28px; width: 90%; max-width: 800px; max-height: 80vh;
-  border: 1px solid rgba(0,255,136,0.3); overflow-y: auto;
-}
-.modal-header {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 24px 28px; border-bottom: 1px solid rgba(0,255,136,0.2);
-}
-.modal-header h3 { margin: 0; color: #00ff88; font-size: 24px; }
-.close-btn { background: none; border: none; font-size: 34px; cursor: pointer; color: #88aabb; }
-.close-btn:hover { color: #ff4444; }
-.modal-body { padding: 28px; }
-.detail-value { text-align: center; margin-bottom: 28px; }
-.current-value .label { font-size: 18px; color: #88aabb; margin-right: 20px; }
-.current-value .value { font-size: 44px; font-weight: bold; font-family: monospace; }
-.current-value .value.normal { color: #00ff88; text-shadow: 0 0 10px rgba(0,255,136,0.5); }
-.current-value .value.warning { color: #ffaa00; text-shadow: 0 0 10px rgba(255,170,0,0.5); }
-.current-value .value.danger { color: #ff4444; text-shadow: 0 0 10px rgba(255,68,68,0.5); }
-.current-value .value.offline { color: #666; }
-.stats-row {
-  display: flex; justify-content: space-around; margin-top: 20px; gap: 20px;
-}
-.stats-row div { text-align: center; }
-.stats-row span { display: block; font-size: 14px; color: #88aabb; margin-bottom: 6px; }
-.stats-row strong { font-size: 18px; color: #fff; }
-.detail-alarms h4 { margin: 0 0 16px 0; color: #ffaa00; font-size: 20px; }
-.alarm-list { max-height: 180px; overflow-y: auto; }
-.alarm-item { padding: 12px 16px; border-radius: 10px; margin-bottom: 8px; font-size: 16px; }
-.alarm-item.warning { background: rgba(255,170,0,0.1); border-left: 4px solid #ffaa00; }
-.alarm-item.danger { background: rgba(255,68,68,0.1); border-left: 4px solid #ff4444; }
-.alarm-item .time { font-family: monospace; margin-right: 16px; color: #88aabb; font-size: 14px; }
-.empty { text-align: center; padding: 24px; color: #666; font-size: 16px; }
+
+.stat-online { color: var(--success); }
+.stat-warning { color: var(--warning); }
+.stat-danger { color: var(--danger); }
+.stat-avg { color: var(--text-muted); }
 
 @media (max-width: 768px) {
-  .digital-tower { padding: 16px; }
-  .stats-row { flex-wrap: wrap; }
-  .current-value .value { font-size: 36px; }
-  .line-header { flex-direction: column; align-items: flex-start; gap: 14px; }
-  .params-grid { grid-template-columns: repeat(2, 1fr); }
+  .digital-tower {
+    padding: 16px;
+  }
+  .line-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .line-stats {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
 }
 </style>
