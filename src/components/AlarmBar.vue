@@ -41,6 +41,7 @@ defineEmits<{ clear: [] }>()
   z-index: 100;
   transform: translateY(100%);
   transition: transform 0.3s ease;
+  font-size: 16px; /* 放大整体字体 */
 }
 
 .alarm-bar.has-alarms {
@@ -54,16 +55,16 @@ defineEmits<{ clear: [] }>()
   gap: 6px;
   background: rgba(230, 160, 23, 0.1);
   padding: 8px 18px;
-  border-radius: 20px;
+  border-radius: 8px;
   flex-shrink: 0;
 }
 
 .alarm-icon .icon {
-  font-size: 18px;
+  font-size: 20px; /* 放大图标 */
 }
 
 .alarm-icon .count {
-  font-size: 17px;
+  font-size: 18px;
   font-weight: 600;
   color: var(--warning);
 }
@@ -81,12 +82,8 @@ defineEmits<{ clear: [] }>()
 }
 
 @keyframes scrollAlarm {
-  0% {
-    transform: translateX(100%);
-  }
-  100% {
-    transform: translateX(-100%);
-  }
+  0% { transform: translateX(100%); }
+  100% { transform: translateX(-100%); }
 }
 
 .alarm-message {
@@ -95,8 +92,8 @@ defineEmits<{ clear: [] }>()
   gap: 12px;
   padding: 10px 20px;
   margin-right: 24px;
-  border-radius: 20px;
-  font-size: 16px;
+  border-radius: 8px;
+  font-size: 16px; /* 放大消息文字 */
 }
 
 .alarm-message.warning {
@@ -109,13 +106,13 @@ defineEmits<{ clear: [] }>()
 
 .msg-time {
   font-family: monospace;
-  font-size: 14px;
+  font-size: 14px; /* 放大时间字体 */
   color: var(--text-muted);
 }
 
 .msg-device {
   font-weight: 600;
-  font-size: 15px;
+  font-size: 16px; /* 放大设备名称 */
   color: var(--text-primary);
 }
 
@@ -126,7 +123,7 @@ defineEmits<{ clear: [] }>()
 
 .msg-content {
   color: var(--text-secondary);
-  font-size: 15px;
+  font-size: 16px; /* 放大内容字体 */
 }
 
 .alarm-message.danger .msg-content {
@@ -147,11 +144,11 @@ defineEmits<{ clear: [] }>()
 .alarm-empty::before {
   content: '●';
   color: var(--success);
-  font-size: 10px;
+  font-size: 14px; /* 放大指示点 */
 }
 
 .alarm-empty span {
-  font-size: 16px;
+  font-size: 16px; /* 放大文字 */
   color: var(--text-muted);
 }
 
@@ -159,8 +156,8 @@ defineEmits<{ clear: [] }>()
   background: none;
   border: 1px solid var(--border-light);
   padding: 8px 20px;
-  border-radius: 20px;
-  font-size: 15px;
+  border-radius: 8px;
+  font-size: 16px; /* 放大按钮文字 */
   cursor: pointer;
   color: var(--text-secondary);
   transition: var(--transition);
@@ -176,12 +173,14 @@ defineEmits<{ clear: [] }>()
 @media (max-width: 768px) {
   .alarm-bar {
     padding: 12px 18px;
+    font-size: 15px;
   }
   .alarm-message {
     padding: 8px 14px;
+    font-size: 15px;
   }
   .msg-device, .msg-content {
-    font-size: 14px;
+    font-size: 15px;
   }
 }
 </style>

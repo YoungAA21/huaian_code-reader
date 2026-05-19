@@ -171,6 +171,9 @@ const handleSave = () => {
 </script>
 
 <style scoped>
+:deep(*) {
+  font-size: 16px !important;
+}
 .threshold-modal-overlay {
   position: fixed;
   top: 0;
