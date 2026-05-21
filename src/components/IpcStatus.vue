@@ -206,25 +206,6 @@ const getHealthClass = (health: number) => {
   return 'danger'
 }
 
-// 监听历史展开，加载数据
-const handleHistoryToggle = () => {
-  if (showHistory.value && historyItems.value.length === 0) {
-    fetchIpcHistory()
-  }
-}
-
-// 监听 showHistory 变化
-const stopWatch = () => {
-  // 使用 watch 监听
-  import('vue').then(({ watch }) => {
-    watch(showHistory, (newVal) => {
-      if (newVal && historyItems.value.length === 0) {
-        fetchIpcHistory()
-      }
-    })
-  })
-}
-
 // 启动定时刷新
 const startRefresh = () => {
   refreshInterval = setInterval(fetchIpcStatus, 10000) // 每10秒刷新一次
