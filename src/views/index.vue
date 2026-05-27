@@ -342,11 +342,11 @@ const saveThresholdConfig = (detectorId: string, config: ThresholdConfigType) =>
   const detector = detectors.value.find(d => d.id === detectorId)
   if (detector) {
     detector.customThreshold = {
-      warning: config.warning,
+      warning: detector.customThreshold?.warning ?? THRESHOLD.warning,
       danger: config.danger
     }
     detector.customTempThreshold = {
-      warning: config.tempWarning,
+      warning: detector.customTempThreshold?.warning ?? 45,
       danger: config.tempDanger
     }
 
@@ -361,12 +361,12 @@ const loadThresholdFromLocal = (detector: any) => {
   const saved = allConfigs[detector.id]
   if (saved) {
     detector.customThreshold = {
-      warning: saved.warning,
+      warning: saved.warning ?? THRESHOLD.warning,
       danger: saved.danger
     }
     detector.customTempThreshold = {
-      warning: saved.tempWarning,
-      danger: saved.tempDanger
+      warning: saved.tempWarning ?? 45,
+      danger: saved.tempDanger ?? 60
     }
   }
 }

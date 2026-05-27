@@ -28,6 +28,29 @@ export interface ReaderStatus {
     updatedTime: string
 }
 
+// 读码器配置
+export interface ReaderSettings {
+    readerId: string
+    name: string
+    enabled: boolean
+    ip: string
+    tcpPort: number
+    hasHeartbeat: boolean
+    heartbeatTimeoutSeconds: number
+    noResultTimeoutMs: number
+    maxIntervalMs: number
+    intervalFluctuationRatio: number
+    maxTemperature: number
+    runtimeReminderEnabled: boolean
+    runtimeReminderHours: number
+}
+
+export interface UpdateReaderMaxTemperatureParams {
+    maxTemperature: number
+    updatedBy: string
+    remark: string
+}
+
 // 读码器状态映射
 export const ReaderStatusMap: Record<number, { text: string; color: string; icon: string }> = {
     0: { text: '离线', color: 'danger', icon: '🔴' },

@@ -17,18 +17,6 @@
           <h4>解码耗时阈值 (ms)</h4>
           <div class="slider-group">
             <div class="slider-item">
-              <label>警告阈值</label>
-              <input
-                  type="range"
-                  v-model.number="localConfig.warning"
-                  min="0"
-                  max="200"
-                  step="1"
-                  @input="clearError"
-              />
-              <span class="value">{{ localConfig.warning }} ms</span>
-            </div>
-            <div class="slider-item">
               <label>危险阈值</label>
               <input
                   type="range"
@@ -40,28 +28,12 @@
               />
               <span class="value">{{ localConfig.danger }} ms</span>
             </div>
-            <div class="threshold-hint" :class="{ 'invalid': localConfig.warning >= localConfig.danger }">
-              <span>⚠️ 警告阈值必须小于危险阈值</span>
-              <span class="current-status">当前: {{ localConfig.warning }} < {{ localConfig.danger }} ? {{ localConfig.warning < localConfig.danger ? '是' : '否' }}</span>
-            </div>
           </div>
         </div>
 
         <div class="config-section">
           <h4>温度阈值 (°C)</h4>
           <div class="slider-group">
-            <div class="slider-item">
-              <label>警告阈值</label>
-              <input
-                  type="range"
-                  v-model.number="localConfig.tempWarning"
-                  min="0"
-                  max="100"
-                  step="1"
-                  @input="clearError"
-              />
-              <span class="value">{{ localConfig.tempWarning }} °C</span>
-            </div>
             <div class="slider-item">
               <label>危险阈值</label>
               <input
@@ -70,13 +42,13 @@
                   min="0"
                   max="100"
                   step="1"
+                  :disabled="loadingTemperature"
                   @input="clearError"
               />
               <span class="value">{{ localConfig.tempDanger }} °C</span>
             </div>
-            <div class="threshold-hint" :class="{ 'invalid': localConfig.tempWarning >= localConfig.tempDanger }">
-              <span>⚠️ 警告阈值必须小于危险阈值</span>
-              <span class="current-status">当前: {{ localConfig.tempWarning }} < {{ localConfig.tempDanger }} ? {{ localConfig.tempWarning < localConfig.tempDanger ? '是' : '否' }}</span>
+            <div v-if="loadingTemperature" class="threshold-hint">
+              <span>正在读取温度阈值...</span>
             </div>
           </div>
         </div>
@@ -84,7 +56,9 @@
 
       <div class="modal-footer">
         <button class="btn-secondary" @click="handleClose">取消</button>
-        <button class="btn-primary" @click="handleSave">保存配置</button>
+        <button class="btn-primary" @click="handleSave" :disabled="saving || loadingTemperature">
+          {{ saving ? '保存中...' : '保存配置' }}
+        </button>
       </div>
     </div>
   </div>
@@ -92,6 +66,7 @@
 
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import { readerApi } from '@/api/reader'
 
 const props = defineProps<{
   visible: boolean
@@ -104,33 +79,53 @@ const emit = defineEmits<{
 }>()
 
 export interface ThresholdConfig {
-  warning: number
   danger: number
-  tempWarning: number
   tempDanger: number
 }
 
 // 默认阈值
 const DEFAULT_CONFIG: ThresholdConfig = {
-  warning: 70,
   danger: 90,
-  tempWarning: 45,
   tempDanger: 60
 }
 
 const localConfig = ref<ThresholdConfig>({ ...DEFAULT_CONFIG })
 const errorMessage = ref('')
+const loadingTemperature = ref(false)
+const saving = ref(false)
 
 // 监听设备变化，加载已有配置
+watch(
+    () => [props.visible, props.detector] as const,
+    async ([visible, newDetector]) => {
+      if (!visible || !newDetector) return
+
+      localConfig.value = {
+        danger: newDetector.customThreshold?.danger ?? DEFAULT_CONFIG.danger,
+        tempDanger: newDetector.customTempThreshold?.danger ?? DEFAULT_CONFIG.tempDanger
+      }
+      errorMessage.value = ''
+
+      loadingTemperature.value = true
+      try {
+        localConfig.value.tempDanger = await readerApi.getReaderMaxTemperature(newDetector.id)
+      } catch (error) {
+        console.error('获取读码器温度阈值失败:', error)
+        errorMessage.value = '获取温度阈值失败，请稍后重试'
+      } finally {
+        loadingTemperature.value = false
+      }
+    },
+    { immediate: true }
+)
+
+// 兼容旧本地配置
 watch(() => props.detector, (newDetector) => {
-  if (newDetector) {
+  if (newDetector && !props.visible) {
     localConfig.value = {
-      warning: newDetector.customThreshold?.warning ?? DEFAULT_CONFIG.warning,
       danger: newDetector.customThreshold?.danger ?? DEFAULT_CONFIG.danger,
-      tempWarning: newDetector.customTempThreshold?.warning ?? DEFAULT_CONFIG.tempWarning,
       tempDanger: newDetector.customTempThreshold?.danger ?? DEFAULT_CONFIG.tempDanger
     }
-    errorMessage.value = ''
   }
 }, { immediate: true })
 
@@ -141,15 +136,13 @@ const clearError = () => {
 
 // 校验配置
 const validateConfig = (): boolean => {
-  // 校验解码耗时阈值
-  if (localConfig.value.warning >= localConfig.value.danger) {
-    errorMessage.value = '解码耗时：警告阈值必须小于危险阈值'
+  if (localConfig.value.danger < 0) {
+    errorMessage.value = '解码耗时危险阈值不能小于 0'
     return false
   }
 
-  // 校验温度阈值
-  if (localConfig.value.tempWarning >= localConfig.value.tempDanger) {
-    errorMessage.value = '温度：警告阈值必须小于危险阈值'
+  if (localConfig.value.tempDanger < 0) {
+    errorMessage.value = '温度危险阈值不能小于 0'
     return false
   }
 
@@ -159,13 +152,27 @@ const validateConfig = (): boolean => {
 
 const handleClose = () => {
   errorMessage.value = ''
+  saving.value = false
   emit('close')
 }
 
-const handleSave = () => {
-  if (validateConfig()) {
-    emit('save', props.detector?.id, localConfig.value)
+const handleSave = async () => {
+  if (!props.detector || !validateConfig()) return
+
+  saving.value = true
+  try {
+    await readerApi.updateReaderMaxTemperature(props.detector.id, {
+      maxTemperature: localConfig.value.tempDanger,
+      updatedBy: 'web',
+      remark: '前端修改温度危险阈值'
+    })
+    emit('save', props.detector.id, localConfig.value)
     handleClose()
+  } catch (error) {
+    console.error('保存温度阈值失败:', error)
+    errorMessage.value = '保存温度阈值失败，请稍后重试'
+  } finally {
+    saving.value = false
   }
 }
 </script>
@@ -354,5 +361,11 @@ const handleSave = () => {
 .btn-primary:hover {
   opacity: 0.9;
   transform: translateY(-1px);
+}
+
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
 }
 </style>
