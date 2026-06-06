@@ -6,10 +6,13 @@
         <h3>设备状态</h3>
       </div>
       <div class="legend-area">
-        <span class="legend-item"><span class="dot normal"></span>正常</span>
-        <span class="legend-item"><span class="dot warning"></span>警告</span>
-        <span class="legend-item"><span class="dot danger"></span>危险</span>
+        <span class="legend-item"><span class="dot unknown"></span>未知</span>
         <span class="legend-item"><span class="dot offline"></span>离线</span>
+        <span class="legend-item"><span class="dot connecting"></span>连接中</span>
+        <span class="legend-item"><span class="dot online"></span>在线</span>
+        <span class="legend-item"><span class="dot warning"></span>警告</span>
+        <span class="legend-item"><span class="dot fault"></span>故障</span>
+        <span class="legend-item"><span class="dot maintenance"></span>维护</span>
       </div>
     </div>
 
@@ -45,20 +48,13 @@
           </div>
         </div>
 
-        <!-- 数值区域 -->
+        <!-- 数值区域 - 显示温度 -->
         <div class="value-area" @click="$emit('openDetail', detector)">
-          <span class="value-number" :class="getValueClass(detector)">{{ detector.displayValue.toFixed(0) }}</span>
-          <span class="value-unit">ms</span>
+          <span class="value-number" :class="getTempClass(detector)">{{ (detector.temperature || 0).toFixed(1) }}</span>
+          <span class="value-unit">°C</span>
           <span class="value-trend" :class="detector.trend > 0 ? 'trend-up' : 'trend-down'">
-            {{ detector.trend > 0 ? '↑' : '↓' }} {{ Math.abs(detector.trend).toFixed(1) }}
-          </span>
-        </div>
-
-        <!-- 温度 -->
-        <div class="temp-area" :class="getTempClass(detector)" @click="$emit('openDetail', detector)">
-          <span class="temp-icon">🌡</span>
-          <span class="temp-value">{{ (detector.temperature || 0).toFixed(1) }}</span>
-          <span class="temp-unit">°C</span>
+    {{ detector.trend > 0 ? '↑' : '↓' }} {{ Math.abs(detector.trend).toFixed(1) }}
+  </span>
         </div>
 
         <!-- 趋势图 -->
@@ -69,16 +65,16 @@
         <!-- 底部统计 -->
         <div class="footer-stats" @click="$emit('openDetail', detector)">
           <div class="stat">
-            <span class="stat-label">总耗时</span>
-            <strong class="stat-value">{{ (detector.lastTotalTime || 0).toFixed(0) }}ms</strong>
+            <span class="stat-label">平均间隔</span>
+            <strong class="stat-value">{{ formatMs(detector.recentAverageValidCodeIntervalMs) }}</strong>
           </div>
           <div class="stat">
-            <span class="stat-label">触发序号</span>
-            <strong class="stat-value">{{ detector.lastTriggerIndex || 0 }}</strong>
+            <span class="stat-label">最新间隔</span>
+            <strong class="stat-value">{{ formatMs(detector.lastValidCodeIntervalMs) }}</strong>
           </div>
           <div class="stat">
-            <span class="stat-label">点位</span>
-            <strong class="stat-value station">{{ detector.stationName || '--' }}</strong>
+            <span class="stat-label">温度阈值</span>
+            <strong class="stat-value">{{ getDetectorTempThreshold(detector).danger.toFixed(1) }}°C</strong>
           </div>
         </div>
 
@@ -160,9 +156,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, reactive } from 'vue'
+import { ref, onMounted, onUnmounted, watch, reactive, nextTick } from 'vue'
 import DecodeRecordsModal from './DecodeRecordsModal.vue'
 import { runtimeApi } from '@/api/runtime'
+import type { ReaderRuntime } from '@/types/runtime'
 
 const props = defineProps<{
   detectors: any[]
@@ -177,16 +174,38 @@ const selectedDetector = ref<any>(null)
 const restartModalVisible = ref(false)
 const restartTarget = ref<any>(null)
 const restartLoading = ref(false)
+const DEFAULT_CONFIRMED_BY = '操作员'
+const DEFAULT_RESTART_REMARK = '统一重启后确认'
 const confirmForm = reactive({
-  confirmedBy: '',
-  remark: ''
+  confirmedBy: DEFAULT_CONFIRMED_BY,
+  remark: DEFAULT_RESTART_REMARK
 })
 
 // 需要重启的读码器ID列表
 const restartReminderIds = ref<Set<string>>(new Set())
 
 // 存储每个读码器的运行时长信息
-const runtimeMap = reactive<Map<string, { hours: number; reminderActive: boolean; thresholdHours: number }>>(new Map())
+const runtimeMap = reactive<Map<string, ReaderRuntime>>(new Map())
+
+const applyRuntimeToDetector = (runtime: ReaderRuntime) => {
+  const detector = props.detectors.find(d => d.id === runtime.readerId)
+  if (!detector) return
+
+  detector.runtimeHours = runtime.accumulatedHours
+  detector.accumulatedSeconds = runtime.accumulatedSeconds
+  detector.remainingSeconds = runtime.remainingSeconds
+  detector.reminderActive = runtime.reminderActive
+  detector.thresholdHours = runtime.thresholdHours
+  detector.reminderThresholdSeconds = runtime.reminderThresholdSeconds
+  detector.isAccumulating = runtime.isAccumulating
+  detector.workshopId = runtime.workshopId
+  detector.lineId = runtime.lineId
+  detector.lineName = runtime.lineId
+  detector.ipcId = runtime.ipcId
+  detector.readerName = runtime.readerName
+  detector.stationName = runtime.readerName || detector.stationName
+  detector.runtimeUpdatedTime = runtime.updatedTime
+}
 
 // 打开解码记录弹窗
 const openDecodeRecords = (detector: any) => {
@@ -209,11 +228,8 @@ const fetchRestartReminders = async () => {
       response.readers.forEach(reader => {
         restartReminderIds.value.add(reader.readerId)
         // 同时更新运行时长信息
-        runtimeMap.set(reader.readerId, {
-          hours: reader.accumulatedHours,
-          reminderActive: reader.reminderActive,
-          thresholdHours: reader.thresholdHours
-        })
+        runtimeMap.set(reader.readerId, reader)
+        applyRuntimeToDetector(reader)
       })
     }
   } catch (error) {
@@ -230,21 +246,10 @@ const needsRestart = (readerId: string) => {
 const fetchReaderRuntime = async (readerId: string) => {
   try {
     const runtime = await runtimeApi.getReaderRuntime(readerId)
-    runtimeMap.set(readerId, {
-      hours: runtime.accumulatedHours,
-      reminderActive: runtime.reminderActive,
-      thresholdHours: runtime.thresholdHours
-    })
-    // 同时更新到 detector 对象中
-    const detector = props.detectors.find(d => d.id === readerId)
-    if (detector) {
-      detector.runtimeHours = runtime.accumulatedHours
-      detector.reminderActive = runtime.reminderActive
-      detector.thresholdHours = runtime.thresholdHours
-    }
+    runtimeMap.set(readerId, runtime)
+    applyRuntimeToDetector(runtime)
   } catch (error) {
     console.error(`获取读码器 ${readerId} 运行时长失败:`, error)
-    runtimeMap.set(readerId, { hours: 0, reminderActive: false, thresholdHours: 8 })
   }
 }
 
@@ -255,11 +260,22 @@ const fetchAllRuntimes = async () => {
   }
 }
 
+const fetchMissingRuntimes = async () => {
+  for (const detector of props.detectors) {
+    const runtime = runtimeMap.get(detector.id)
+    if (runtime) {
+      applyRuntimeToDetector(runtime)
+    } else {
+      await fetchReaderRuntime(detector.id)
+    }
+  }
+}
+
 // 获取运行时长小时数
 const getRuntimeHours = (detector: any) => {
   const runtime = runtimeMap.get(detector.id)
   if (runtime) {
-    return runtime.hours.toFixed(1)
+    return runtime.accumulatedHours.toFixed(1)
   }
   return detector.runtimeHours?.toFixed(1) || '0.0'
 }
@@ -280,7 +296,7 @@ const getRuntimeClass = (detector: any) => {
   if (reminderActive) {
     return 'warning'
   }
-  const hours = runtime?.hours || detector.runtimeHours || 0
+  const hours = runtime?.accumulatedHours || detector.runtimeHours || 0
   const threshold = runtime?.thresholdHours || detector.thresholdHours || 8
   if (hours >= threshold) {
     return 'danger'
@@ -294,8 +310,8 @@ const getRuntimeClass = (detector: any) => {
 // 打开重启确认弹窗
 const openRestartConfirm = (detector: any) => {
   restartTarget.value = detector
-  confirmForm.confirmedBy = ''
-  confirmForm.remark = ''
+  confirmForm.confirmedBy = DEFAULT_CONFIRMED_BY
+  confirmForm.remark = `${detector.id || '读码器'} ${DEFAULT_RESTART_REMARK}`
   restartModalVisible.value = true
 }
 
@@ -327,18 +343,8 @@ const confirmRestart = async () => {
 
     // 更新本地运行时长信息
     if (result.counter) {
-      runtimeMap.set(restartTarget.value.id, {
-        hours: result.counter.accumulatedHours,
-        reminderActive: result.counter.reminderActive,
-        thresholdHours: result.counter.thresholdHours
-      })
-      // 更新 detector 对象
-      const detector = props.detectors.find(d => d.id === restartTarget.value.id)
-      if (detector) {
-        detector.runtimeHours = result.counter.accumulatedHours
-        detector.reminderActive = result.counter.reminderActive
-        detector.thresholdHours = result.counter.thresholdHours
-      }
+      runtimeMap.set(restartTarget.value.id, result.counter)
+      applyRuntimeToDetector(result.counter)
     }
 
     alert(`重启成功！${result.message}`)
@@ -349,11 +355,6 @@ const confirmRestart = async () => {
   } finally {
     restartLoading.value = false
   }
-}
-
-// 获取设备的自定义阈值，如果没有则使用全局阈值
-const getDetectorThreshold = (detector: any) => {
-  return detector.customThreshold || props.threshold
 }
 
 const getDetectorTempThreshold = (detector: any) => {
@@ -381,57 +382,59 @@ const drawChart = (detector: any, canvas: HTMLCanvasElement) => {
 
     ctx.clearRect(0, 0, width, height)
 
-    if (detector.trendData.length < 2) return
+    const values = detector.trendData.map((value: number) => Number(value)).filter((value: number) => Number.isFinite(value))
+    if (!values.length) return
 
-    const values = detector.trendData
-    const maxTime = Math.max(...values, 1)
-    const minTime = Math.min(...values, 0)
-    const range = Math.max(maxTime - minTime, 1)
+    const maxTemp = Math.max(...values)
+    const minTemp = Math.min(...values)
+    const rawRange = maxTemp - minTemp
+    const minVisibleRange = 0.2
+    const range = Math.max(rawRange, minVisibleRange)
+    const center = rawRange > 0 ? (maxTemp + minTemp) / 2 : (detector.temperature || maxTemp)
+    const chartMin = center - range / 2
+    const chartMax = center + range / 2
+    const chartPadding = 4
 
-    const stepX = width / (values.length - 1)
+    const stepX = values.length > 1 ? width / (values.length - 1) : width
 
     ctx.beginPath()
     ctx.lineWidth = 1.5
     ctx.lineCap = 'round'
     ctx.lineJoin = 'round'
 
-    const threshold = getDetectorThreshold(detector)
-    if (detector.displayValue >= threshold.danger) ctx.strokeStyle = '#dc3545'
-    else if (detector.displayValue >= threshold.warning) ctx.strokeStyle = '#e6a017'
+    const threshold = getDetectorTempThreshold(detector)
+    if (detector.temperature >= threshold.danger) ctx.strokeStyle = '#dc3545'
+    else if (detector.temperature >= threshold.warning) ctx.strokeStyle = '#e6a017'
     else ctx.strokeStyle = '#2d6a4f'
 
     values.forEach((val: number, i: number) => {
-      const x = i * stepX
-      const y = height - ((val - minTime) / range) * height
+      const x = values.length > 1 ? i * stepX : width / 2
+      const ratio = (val - chartMin) / (chartMax - chartMin)
+      const y = height - chartPadding - ratio * (height - chartPadding * 2)
       if (i === 0) ctx.moveTo(x, y)
       else ctx.lineTo(x, y)
     })
+    if (values.length === 1) {
+      ctx.arc(width / 2, height / 2, 2, 0, Math.PI * 2)
+    }
     ctx.stroke()
   })
   animationMap.set(detector.id, id)
 }
 
+const drawAllCharts = () => {
+  props.detectors.forEach(d => {
+    const canvas = canvasMap.get(d.id)
+    if (canvas) drawChart(d, canvas)
+  })
+}
+
 const getCardStatus = (d: any) => {
-  if (!d.isConnected) return d.status === 'NO_READ' ? 'warning' : 'offline'
-  const threshold = getDetectorThreshold(d)
-  if (d.displayValue >= threshold.danger) return 'danger'
-  if (d.displayValue >= threshold.warning) return 'warning'
-  return 'normal'
+  return d.status || 'unknown'
 }
 
 const getDotClass = (d: any) => {
-  if (!d.isConnected) return d.status === 'NO_READ' ? 'warning' : 'offline'
-  const threshold = getDetectorThreshold(d)
-  if (d.displayValue >= threshold.danger) return 'danger'
-  if (d.displayValue >= threshold.warning) return 'warning'
-  return 'normal'
-}
-
-const getValueClass = (d: any) => {
-  const threshold = getDetectorThreshold(d)
-  if (d.displayValue >= threshold.danger) return 'danger'
-  if (d.displayValue >= threshold.warning) return 'warning'
-  return ''
+  return d.status || 'unknown'
 }
 
 const getTempClass = (d: any) => {
@@ -442,26 +445,40 @@ const getTempClass = (d: any) => {
   return 'normal'
 }
 
-// 监听 detectors 变化，加载运行时长
+const formatMs = (value: number | null | undefined) => {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '--'
+  return `${Number(value).toFixed(0)}ms`
+}
+
+let runtimeRefreshInterval: any
+
+const refreshRuntimeState = async () => {
+  await fetchRestartReminders()
+  await fetchAllRuntimes()
+}
+
+const startRuntimeRefresh = () => {
+  runtimeRefreshInterval = setInterval(refreshRuntimeState, 60000)
+}
+
+// 监听 detectors 变化，只为新出现的读码器补运行时长，避免随列表 3 秒刷新高频请求 runtime 接口
 watch(() => props.detectors, (newDetectors) => {
   if (newDetectors && newDetectors.length > 0) {
-    fetchAllRuntimes()
+    fetchMissingRuntimes()
+    nextTick(drawAllCharts)
   }
 }, { deep: true, immediate: true })
 
 onMounted(() => {
   // 获取需要重启提醒的读码器列表
-  fetchRestartReminders()
+  refreshRuntimeState()
+  startRuntimeRefresh()
 
-  setTimeout(() => {
-    props.detectors.forEach(d => {
-      const canvas = canvasMap.get(d.id)
-      if (canvas) drawChart(d, canvas)
-    })
-  }, 100)
+  setTimeout(drawAllCharts, 100)
 })
 
 onUnmounted(() => {
+  if (runtimeRefreshInterval) clearInterval(runtimeRefreshInterval)
   animationMap.forEach(id => cancelAnimationFrame(id))
   animationMap.clear()
 })
@@ -542,6 +559,7 @@ onUnmounted(() => {
 
 .legend-area {
   display: flex;
+  flex-wrap: wrap;
   gap: 16px;
 }
 
@@ -559,14 +577,17 @@ onUnmounted(() => {
   border-radius: 50%;
 }
 
-.dot.normal { background: var(--success); }
-.dot.warning { background: var(--warning); }
-.dot.danger { background: var(--danger); }
+.dot.unknown { background: var(--text-muted); }
 .dot.offline { background: var(--border-heavy); }
+.dot.connecting { background: var(--info); }
+.dot.online { background: var(--success); }
+.dot.warning { background: var(--warning); }
+.dot.fault { background: var(--danger); }
+.dot.maintenance { background: var(--primary); }
 
 .grid-container {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(4, 1fr);
   gap: 16px;
 }
 
@@ -586,10 +607,13 @@ onUnmounted(() => {
 }
 
 /* 状态边框 */
-.device-card[data-status="normal"] { border-top: 3px solid var(--success); }
-.device-card[data-status="warning"] { border-top: 3px solid var(--warning); }
-.device-card[data-status="danger"] { border-top: 3px solid var(--danger); }
+.device-card[data-status="unknown"] { border-top: 3px solid var(--text-muted); opacity: 0.85; }
 .device-card[data-status="offline"] { border-top: 3px solid var(--border-heavy); opacity: 0.7; }
+.device-card[data-status="connecting"] { border-top: 3px solid var(--info); }
+.device-card[data-status="online"] { border-top: 3px solid var(--success); }
+.device-card[data-status="warning"] { border-top: 3px solid var(--warning); }
+.device-card[data-status="fault"] { border-top: 3px solid var(--danger); }
+.device-card[data-status="maintenance"] { border-top: 3px solid var(--primary); }
 
 .card-header {
   display: flex;
@@ -618,10 +642,13 @@ onUnmounted(() => {
   margin-top: 4px;
 }
 
-.status-dot.normal { background: var(--success); }
-.status-dot.warning { background: var(--warning); animation: pulse-warning 1.5s infinite; }
-.status-dot.danger { background: var(--danger); animation: pulse-danger 1s infinite; }
+.status-dot.unknown { background: var(--text-muted); }
 .status-dot.offline { background: var(--border-heavy); }
+.status-dot.connecting { background: var(--info); animation: pulse-warning 1.5s infinite; }
+.status-dot.online { background: var(--success); }
+.status-dot.warning { background: var(--warning); animation: pulse-warning 1.5s infinite; }
+.status-dot.fault { background: var(--danger); animation: pulse-danger 1s infinite; }
+.status-dot.maintenance { background: var(--primary); }
 
 @keyframes pulse-warning {
   0%, 100% { opacity: 1; }

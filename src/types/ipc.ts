@@ -8,6 +8,8 @@ export interface IpcStatus {
     processId: number
     appCpuUsagePercent: number
     appMemoryMb: number
+    systemCpuUsagePercent: number
+    systemMemoryUsagePercent: number
     appUptimeHours: number
     diskPath: string
     diskFreeGb: number
@@ -28,6 +30,8 @@ export interface IpcHistoryItem {
     processId: number
     appCpuUsagePercent: number
     appMemoryMb: number
+    systemCpuUsagePercent: number
+    systemMemoryUsagePercent: number
     appUptimeHours: number
     diskPath: string
     diskFreeGb: number

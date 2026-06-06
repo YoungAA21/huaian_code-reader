@@ -23,19 +23,21 @@
       <div class="status-grid">
         <div class="status-item">
           <div class="item-label">CPU使用率</div>
-          <div class="item-value" :class="getCpuClass(ipcStatus.appCpuUsagePercent)">
-            {{ ipcStatus.appCpuUsagePercent.toFixed(2) }}%
+          <div class="item-value" :class="getCpuClass(ipcStatus.systemCpuUsagePercent)">
+            {{ ipcStatus.systemCpuUsagePercent.toFixed(2) }}%
           </div>
           <div class="item-bar">
-            <div class="bar-fill" :style="{ width: Math.min(ipcStatus.appCpuUsagePercent, 100) + '%' }" :class="getCpuClass(ipcStatus.appCpuUsagePercent)"></div>
+            <div class="bar-fill" :style="{ width: Math.min(ipcStatus.systemCpuUsagePercent, 100) + '%' }" :class="getCpuClass(ipcStatus.systemCpuUsagePercent)"></div>
           </div>
         </div>
 
         <div class="status-item">
-          <div class="item-label">内存使用</div>
-          <div class="item-value">{{ ipcStatus.appMemoryMb.toFixed(0) }} MB</div>
+          <div class="item-label">内存使用率</div>
+          <div class="item-value" :class="getMemoryClass(ipcStatus.systemMemoryUsagePercent)">
+            {{ ipcStatus.systemMemoryUsagePercent.toFixed(2) }}%
+          </div>
           <div class="item-bar">
-            <div class="bar-fill memory-bar" :style="{ width: getMemoryPercent(ipcStatus.appMemoryMb) + '%' }"></div>
+            <div class="bar-fill memory-bar" :style="{ width: Math.min(ipcStatus.systemMemoryUsagePercent, 100) + '%' }" :class="getMemoryClass(ipcStatus.systemMemoryUsagePercent)"></div>
           </div>
         </div>
 
@@ -96,7 +98,7 @@
           <tr>
             <th>时间</th>
             <th>CPU%</th>
-            <th>内存(MB)</th>
+            <th>内存%</th>
             <th>磁盘%</th>
             <th>状态</th>
           </tr>
@@ -104,8 +106,8 @@
           <tbody>
           <tr v-for="item in historyItems" :key="item.time">
             <td>{{ formatTime(item.time) }}</td>
-            <td :class="getCpuClass(item.appCpuUsagePercent)">{{ item.appCpuUsagePercent.toFixed(2) }}%</td>
-            <td>{{ item.appMemoryMb.toFixed(0) }}</td>
+            <td :class="getCpuClass(item.systemCpuUsagePercent)">{{ item.systemCpuUsagePercent.toFixed(2) }}%</td>
+            <td :class="getMemoryClass(item.systemMemoryUsagePercent)">{{ item.systemMemoryUsagePercent.toFixed(2) }}%</td>
             <td :class="getDiskClass(item.diskUsagePercent)">{{ item.diskUsagePercent.toFixed(2) }}%</td>
             <td>
               <span class="status-dot" :class="item.agentOnline ? 'online' : 'offline'"></span>
@@ -179,16 +181,16 @@ const formatTime = (timeStr: string) => {
   return date.toLocaleTimeString('zh-CN', { hour12: false })
 }
 
-// 计算内存使用百分比（假设总内存约4GB=4096MB）
-const getMemoryPercent = (memoryMb: number) => {
-  const totalMemory = 4096 // 假设4GB总内存
-  return Math.min((memoryMb / totalMemory) * 100, 100)
-}
-
 // CPU 颜色类
 const getCpuClass = (cpu: number) => {
   if (cpu >= 80) return 'danger'
   if (cpu >= 50) return 'warning'
+  return 'success'
+}
+
+const getMemoryClass = (memory: number) => {
+  if (memory >= 80) return 'danger'
+  if (memory >= 60) return 'warning'
   return 'success'
 }
 

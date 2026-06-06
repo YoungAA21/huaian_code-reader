@@ -108,6 +108,20 @@ export interface Detector {
     // 其他
     message?: string
     status_code?: number
+    workshopId?: string
+    lineId?: string
+    ipcId?: string
+    readerName?: string
+
+    // 运行时信息
+    runtimeHours?: number
+    accumulatedSeconds?: number
+    remainingSeconds?: number
+    reminderActive?: boolean
+    thresholdHours?: number
+    reminderThresholdSeconds?: number
+    isAccumulating?: boolean
+    runtimeUpdatedTime?: string
 
     // 告警和趋势
     alarms: AlarmRecord[]

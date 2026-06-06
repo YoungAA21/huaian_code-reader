@@ -1,11 +1,14 @@
 <template>
-  <div class="digital-tower">
+  <div ref="towerRef" class="digital-tower">
     <!-- 顶部：标题栏 + KPI 卡片 -->
     <HeaderSection
         :current-time="currentTime"
         :current-date="currentDate"
         :detectors="detectors"
         :threshold="THRESHOLD"
+        :is-fullscreen="isFullscreen"
+        :production-status="productionStatus"
+        @toggle-fullscreen="toggleFullscreen"
     />
 
     <!-- 工控机状态卡片 -->
@@ -19,11 +22,16 @@
           <h2>所有读码器</h2>
           <span class="section-badge">{{ detectors.length }}台</span>
         </div>
-        <div class="section-stats">
-          <span class="stat-online">● 在线 {{ getTotalOnlineCount() }}</span>
-          <span class="stat-warning">● 警告 {{ getTotalWarningCount() }}</span>
-          <span class="stat-danger">● 危险 {{ getTotalDangerCount() }}</span>
-          <span class="stat-avg">均值 {{ getTotalAvgValue().toFixed(1) }}</span>
+        <div class="section-actions">
+          <div class="section-stats">
+            <span class="stat-unknown">● 未知 {{ getStatusCount(0) }}</span>
+            <span class="stat-offline">● 离线 {{ getStatusCount(1) }}</span>
+            <span class="stat-connecting">● 连接中 {{ getStatusCount(2) }}</span>
+            <span class="stat-online">● 在线 {{ getStatusCount(3) }}</span>
+            <span class="stat-warning">● 警告 {{ getStatusCount(4) }}</span>
+            <span class="stat-danger">● 故障 {{ getStatusCount(5) }}</span>
+            <span class="stat-maintenance">● 维护 {{ getStatusCount(6) }}</span>
+          </div>
         </div>
       </div>
 
@@ -33,6 +41,28 @@
           @open-detail="openDetail"
           @config-threshold="openThresholdConfig"
       />
+    </div>
+
+    <!-- 板卡/IO 状态 -->
+    <div class="io-status-section">
+      <div class="section-header">
+        <div class="section-title">
+          <span class="section-indicator"></span>
+          <h2>板卡/IO状态</h2>
+          <span class="section-badge">{{ ioSignals.length }}点</span>
+        </div>
+      </div>
+      <div class="io-grid">
+        <div
+            v-for="item in ioSignals"
+            :key="item.index"
+            class="io-item"
+            :class="item.active ? 'active' : 'inactive'"
+        >
+          <span class="io-light"></span>
+          <span class="io-name">{{ item.label }}</span>
+        </div>
+      </div>
     </div>
 
     <!-- 底部：报警栏 -->
@@ -55,7 +85,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import HeaderSection from '../components/HeaderSection.vue'
 import DetectorGrid from '../components/DetectorGrid.vue'
 import AlarmBar from '../components/AlarmBar.vue'
@@ -65,9 +95,12 @@ import ThresholdConfig from '../components/ThresholdConfig.vue'
 import type { ThresholdConfig as ThresholdConfigType } from '../components/ThresholdConfig.vue'
 import { alarmApi } from '@/api/alarm'
 import { readerApi } from '@/api/reader'
+import { productionApi } from '@/api/production'
 import type { Alarm } from '@/types/alarm'
 import type { ReaderStatus } from '@/types/reader'
+import { ReaderStatusMap } from '@/types/reader'
 import type {Detector} from "@/types/detection.ts";
+import type { ProductionStatus } from '@/types/production'
 
 // ==================== 配置 ====================
 const THRESHOLD = { warning: 70, danger: 90 }
@@ -79,35 +112,64 @@ const currentDate = ref('')
 const detectors = ref<any[]>([])
 const selectedDetector = ref<any>(null)
 const latestAlarms = ref<any[]>([])
+const productionStatus = ref<ProductionStatus | null>(null)
+const ioSignalValues = ref<boolean[]>([])
 const thresholdConfigVisible = ref(false)
 const configTargetDetector = ref<any>(null)
+const towerRef = ref<HTMLElement | null>(null)
+const isFullscreen = ref(false)
+
+const toggleFullscreen = async () => {
+  try {
+    if (!document.fullscreenElement) {
+      await towerRef.value?.requestFullscreen()
+    } else {
+      await document.exitFullscreen()
+    }
+  } catch (error) {
+    console.error('切换全屏失败:', error)
+  }
+}
+
+const handleFullscreenChange = () => {
+  isFullscreen.value = document.fullscreenElement === towerRef.value
+}
+
+const ioSignals = computed(() => {
+  const signals = ioSignalValues.value
+  return Array.from({ length: 32 }, (_, index) => ({
+    index,
+    label: index + 1,
+    active: Boolean(signals[index])
+  }))
+})
+
+const updateIoSignals = (payload: any) => {
+  const signals = Array.isArray(payload) ? payload : payload?.ioSignals
+  if (!Array.isArray(signals)) return
+  ioSignalValues.value = signals.slice(0, 32).map(Boolean)
+}
 
 // ==================== 将 API 读码器数据转换为组件格式 ====================
 // 将 API 读码器数据转换为组件格式（传递全部字段）
 const convertReaderToDetector = (reader: ReaderStatus): Detector => {
-  const isOnline = reader.tcpConnected && reader.pingOk
-  let statusText = '离线'
-  if (isOnline) {
-    statusText = '正常'
-  } else if (!reader.tcpConnected && reader.pingOk) {
-    statusText = 'TCP断开'
-  } else if (!reader.pingOk) {
-    statusText = 'Ping失败'
-  }
+  const statusMeta = ReaderStatusMap[reader.status] || ReaderStatusMap[0]
+  const isOnline = reader.status === 3
 
   const displayValue = reader.lastValidCodeIntervalMs || 0
+  const temperature = reader.currentTemperature || 0
 
   return {
     // 基础信息
     id: reader.readerId,
     name: reader.name || reader.readerId,
     device: reader.readerId,
-    lineName: '产线一',
+    lineName: (reader as any).lineId || '',
     stationName: reader.name,
 
     // 状态信息
-    status: isOnline ? 'OK' : 'OFFLINE',
-    statusText: statusText,
+    status: statusMeta.color,
+    statusText: statusMeta.text,
     isConnected: isOnline,
     wasOnline: isOnline,
 
@@ -121,7 +183,7 @@ const convertReaderToDetector = (reader: ReaderStatus): Detector => {
     avgValue: displayValue,
 
     // 温度
-    temperature: reader.currentTemperature || 0,
+    temperature,
     lastTempWarning: false,
 
     // 时间相关（全部传递）
@@ -165,7 +227,7 @@ const convertReaderToDetector = (reader: ReaderStatus): Detector => {
 
     // 告警和趋势数据
     alarms: [],
-    trendData: [displayValue],
+    trendData: [temperature],
     valueBuffer: [displayValue],
     lastRenderTime: Date.now(),
 
@@ -189,18 +251,41 @@ const fetchReadersStatus = async () => {
           newDetector.customThreshold = oldDetector.customThreshold
           newDetector.customTempThreshold = oldDetector.customTempThreshold
           newDetector.alarms = oldDetector.alarms || []
-          newDetector.trendData = oldDetector.trendData || [newDetector.displayValue]
+          newDetector.trendData = oldDetector.trendData || [newDetector.temperature]
           newDetector.valueBuffer = oldDetector.valueBuffer || []
+
+          const runtimeFields = [
+            'workshopId',
+            'lineId',
+            'ipcId',
+            'readerName',
+            'runtimeHours',
+            'accumulatedSeconds',
+            'remainingSeconds',
+            'reminderActive',
+            'thresholdHours',
+            'reminderThresholdSeconds',
+            'isAccumulating',
+            'runtimeUpdatedTime'
+          ] as const
+          runtimeFields.forEach((field) => {
+            if (oldDetector[field] !== undefined) {
+              ;(newDetector as any)[field] = oldDetector[field]
+            }
+          })
+          if (oldDetector.lineId || oldDetector.lineName) {
+            newDetector.lineName = oldDetector.lineName || oldDetector.lineId
+          }
 
           // 更新趋势数据
           if (newDetector.trendData.length > MAX_TREND_POINTS) {
             newDetector.trendData.shift()
           }
-          newDetector.trendData.push(newDetector.displayValue)
+          newDetector.trendData.push(newDetector.temperature)
 
           // 计算趋势
-          const lastValue = oldDetector.lastValue || newDetector.displayValue
-          newDetector.trend = newDetector.displayValue - lastValue
+          const lastValue = oldDetector.temperature ?? newDetector.temperature
+          newDetector.trend = newDetector.temperature - lastValue
           if (lastValue !== 0) {
             newDetector.changeRate = (newDetector.trend / Math.abs(lastValue)) * 100
           }
@@ -265,6 +350,22 @@ const fetchActiveAlarms = async () => {
   }
 }
 
+// 从 API 获取生产状态，用于顶部产线状态
+let productionStatusLoading = false
+const fetchProductionStatus = async () => {
+  if (productionStatusLoading) return
+  productionStatusLoading = true
+  try {
+    const status = await productionApi.getProductionStatus()
+    productionStatus.value = status
+    updateIoSignals(status)
+  } catch (error) {
+    console.error('获取生产状态失败:', error)
+  } finally {
+    productionStatusLoading = false
+  }
+}
+
 // 定时刷新读码器状态
 let readersRefreshInterval: any
 const startReadersRefresh = () => {
@@ -277,33 +378,18 @@ const startAlarmRefresh = () => {
   alarmRefreshInterval = setInterval(fetchActiveAlarms, 5000)
 }
 
+let productionRefreshInterval: any
+const startProductionRefresh = () => {
+  productionRefreshInterval = setInterval(fetchProductionStatus, 1000)
+}
+
 const clearAllAlarms = () => {
   latestAlarms.value = []
 }
 
 // ==================== 计算属性 - 所有读码器统计 ====================
-const getTotalOnlineCount = () => {
-  return detectors.value.filter(d => d.isConnected).length
-}
-
-const getTotalWarningCount = () => {
-  return detectors.value.filter(d => {
-    const threshold = d.customThreshold || THRESHOLD
-    return d.displayValue >= threshold.warning && d.displayValue < threshold.danger
-  }).length
-}
-
-const getTotalDangerCount = () => {
-  return detectors.value.filter(d => {
-    const threshold = d.customThreshold || THRESHOLD
-    return d.displayValue >= threshold.danger
-  }).length
-}
-
-const getTotalAvgValue = () => {
-  if (detectors.value.length === 0) return 0
-  const sum = detectors.value.reduce((s, d) => s + d.displayValue, 0)
-  return sum / detectors.value.length
+const getStatusCount = (statusCode: number) => {
+  return detectors.value.filter(d => d.status_code === statusCode).length
 }
 
 // ==================== 辅助函数 ====================
@@ -341,10 +427,7 @@ const closeThresholdConfig = () => {
 const saveThresholdConfig = (detectorId: string, config: ThresholdConfigType) => {
   const detector = detectors.value.find(d => d.id === detectorId)
   if (detector) {
-    detector.customThreshold = {
-      warning: detector.customThreshold?.warning ?? THRESHOLD.warning,
-      danger: config.danger
-    }
+    // 删除 customThreshold 相关代码，因为不再需要解码耗时阈值
     detector.customTempThreshold = {
       warning: detector.customTempThreshold?.warning ?? 45,
       danger: config.tempDanger
@@ -382,12 +465,14 @@ const loadAllThresholds = () => {
 let statsInterval: any
 
 onMounted(async () => {
+  document.addEventListener('fullscreenchange', handleFullscreenChange)
   formatTime()
   setInterval(formatTime, 1000)
 
   // 初始化：获取读码器状态和告警
   await fetchReadersStatus()
   await fetchActiveAlarms()
+  await fetchProductionStatus()
 
   // 加载保存的阈值配置
   loadAllThresholds()
@@ -395,13 +480,16 @@ onMounted(async () => {
   // 启动定时刷新
   startReadersRefresh()
   startAlarmRefresh()
+  startProductionRefresh()
   statsInterval = setInterval(updateStatistics, 2000)
 })
 
 onUnmounted(() => {
+  document.removeEventListener('fullscreenchange', handleFullscreenChange)
   clearInterval(statsInterval)
   clearInterval(readersRefreshInterval)
   clearInterval(alarmRefreshInterval)
+  clearInterval(productionRefreshInterval)
 })
 </script>
 
@@ -513,18 +601,32 @@ body {
   margin-bottom: 40px;
 }
 
+.io-status-section {
+  margin-bottom: 80px;
+}
+
 .section-header {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
+  align-items: center;
   margin-bottom: 20px;
   padding: 0 4px;
+  gap: 16px;
 }
 
 .section-title {
   display: flex;
   align-items: baseline;
   gap: 12px;
+  flex-shrink: 0;
+}
+
+.section-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  min-width: 0;
 }
 
 .section-indicator {
@@ -552,6 +654,7 @@ body {
 
 .section-stats {
   display: flex;
+  flex-wrap: wrap;
   gap: 24px;
   font-size: 16px;
   font-weight: 500;
@@ -563,10 +666,55 @@ body {
   gap: 4px;
 }
 
+.stat-unknown { color: var(--text-muted); }
+.stat-offline { color: var(--border-heavy); }
+.stat-connecting { color: var(--info); }
 .stat-online { color: var(--success); }
 .stat-warning { color: var(--warning); }
 .stat-danger { color: var(--danger); }
-.stat-avg { color: var(--text-muted); }
+.stat-maintenance { color: var(--primary); }
+
+.io-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 10px;
+}
+
+.io-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 8px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.io-light {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 3px rgba(173, 181, 189, 0.12);
+}
+
+.io-item.active .io-light {
+  background: var(--success);
+  box-shadow: 0 0 0 3px rgba(45, 106, 79, 0.14);
+}
+
+.io-item.inactive .io-light {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px rgba(220, 53, 69, 0.14);
+}
+
+.io-name {
+  font-family: 'SF Mono', 'JetBrains Mono', monospace;
+}
 
 @media (max-width: 768px) {
   .digital-tower {
@@ -576,6 +724,10 @@ body {
     flex-direction: column;
     align-items: flex-start;
     gap: 12px;
+  }
+  .section-actions {
+    width: 100%;
+    justify-content: space-between;
   }
   .section-stats {
     flex-wrap: wrap;

@@ -21,7 +21,7 @@
             <span class="stat-value success">{{ validCount }}</span>
           </div>
           <div class="stat-item">
-            <span class="stat-label">无效码</span>
+            <span class="stat-label">失败</span>
             <span class="stat-value danger">{{ invalidCount }}</span>
           </div>
           <div class="stat-item">
@@ -40,9 +40,11 @@
           />
           <select v-model="filterType" class="filter-select">
             <option value="all">全部</option>
-            <option value="valid">有效码</option>
-            <option value="invalid">无效码</option>
-            <option value="heartbeat">心跳包</option>
+            <option value="unknown">未知</option>
+            <option value="valid">有效代码</option>
+            <option value="heartbeat">心跳</option>
+            <option value="fail">失败</option>
+            <option value="multi">多码</option>
           </select>
           <button class="refresh-btn" @click="loadDecodeRecords" :disabled="loading">
             🔄
@@ -55,11 +57,7 @@
               v-for="record in filteredRecords"
               :key="record.id"
               class="record-item"
-              :class="{
-              'valid': record.isValidCode,
-              'invalid': record.isFail,
-              'heartbeat': record.isHeartbeat
-            }"
+              :class="getBadgeClass(record)"
           >
             <div class="record-time">{{ formatTime(record.receiveTime) }}</div>
             <div class="record-code">
@@ -111,21 +109,32 @@ const searchText = ref('')
 const filterType = ref('all')
 
 // 统计数据
-const validCount = computed(() => records.value.filter(r => r.isValidCode && !r.isHeartbeat).length)
-const invalidCount = computed(() => records.value.filter(r => r.isFail).length)
-const heartbeatCount = computed(() => records.value.filter(r => r.isHeartbeat).length)
+const validCount = computed(() => records.value.filter(r => r.receiveType === 1).length)
+const invalidCount = computed(() => records.value.filter(r => r.receiveType === 3).length)
+const heartbeatCount = computed(() => records.value.filter(r => r.receiveType === 2).length)
+
+const ReceiveTypeMap: Record<number, { text: string; className: string }> = {
+  0: { text: '未知', className: 'unknown' },
+  1: { text: '有效代码', className: 'valid' },
+  2: { text: '心跳', className: 'heartbeat' },
+  3: { text: '失败', className: 'fail' },
+  4: { text: '多码', className: 'multi' }
+}
 
 // 过滤后的记录
 const filteredRecords = computed(() => {
   let result = [...records.value]
 
   // 按类型过滤
-  if (filterType.value === 'valid') {
-    result = result.filter(r => r.isValidCode && !r.isHeartbeat)
-  } else if (filterType.value === 'invalid') {
-    result = result.filter(r => r.isFail)
-  } else if (filterType.value === 'heartbeat') {
-    result = result.filter(r => r.isHeartbeat)
+  if (filterType.value !== 'all') {
+    const filterTypeMap: Record<string, number> = {
+      unknown: 0,
+      valid: 1,
+      heartbeat: 2,
+      fail: 3,
+      multi: 4
+    }
+    result = result.filter(r => r.receiveType === filterTypeMap[filterType.value])
   }
 
   // 按码值搜索
@@ -142,18 +151,12 @@ const filteredRecords = computed(() => {
 
 // 获取徽章样式类
 const getBadgeClass = (record: DecodeResult) => {
-  if (record.isHeartbeat) return 'heartbeat'
-  if (record.isValidCode) return 'valid'
-  if (record.isFail) return 'invalid'
-  return ''
+  return ReceiveTypeMap[record.receiveType]?.className || 'unknown'
 }
 
 // 获取徽章文本
 const getBadgeText = (record: DecodeResult) => {
-  if (record.isHeartbeat) return '心跳'
-  if (record.isValidCode) return '有效'
-  if (record.isFail) return '无效'
-  return ''
+  return ReceiveTypeMap[record.receiveType]?.text || ReceiveTypeMap[0].text
 }
 
 // 加载解码记录
@@ -433,13 +436,21 @@ watch(() => props.visible, (newVal) => {
   background: rgba(45, 106, 79, 0.15);
   color: var(--success);
 }
-.code-badge.invalid {
+.code-badge.unknown {
+  background: rgba(154, 174, 191, 0.15);
+  color: var(--text-muted);
+}
+.code-badge.fail {
   background: rgba(220, 53, 69, 0.15);
   color: var(--danger);
 }
 .code-badge.heartbeat {
   background: rgba(230, 160, 23, 0.15);
   color: var(--warning);
+}
+.code-badge.multi {
+  background: rgba(74, 144, 226, 0.15);
+  color: var(--info);
 }
 
 .record-reader {
@@ -452,11 +463,17 @@ watch(() => props.visible, (newVal) => {
 .record-item.valid {
   border-left: 2px solid var(--success);
 }
-.record-item.invalid {
+.record-item.unknown {
+  border-left: 2px solid var(--text-muted);
+}
+.record-item.fail {
   border-left: 2px solid var(--danger);
 }
 .record-item.heartbeat {
   border-left: 2px solid var(--warning);
+}
+.record-item.multi {
+  border-left: 2px solid var(--info);
 }
 
 .records-loading, .records-empty {

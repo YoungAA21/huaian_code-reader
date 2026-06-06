@@ -3,7 +3,7 @@
     <div class="title-bar">
       <div class="logo-area">
         <div class="logo-mark"></div>
-        <h1>卷包车间检测监控中心</h1>
+        <h1>二维码健康监测</h1>
       </div>
       <div class="right-area">
         <!-- 产线下拉选择器 -->
@@ -20,6 +20,9 @@
           <div class="time">{{ currentTime }}</div>
           <div class="date">{{ currentDate }}</div>
         </div>
+        <button class="fullscreen-toggle" @click="emit('toggleFullscreen')">
+          {{ isFullscreen ? '退出全屏' : '全屏' }}
+        </button>
       </div>
     </div>
 
@@ -29,21 +32,15 @@
         <span class="status-badge" :class="getRunStateClass()">
           {{ getRunStateIcon() }} {{ getRunStateText() }}
         </span>
-        <span class="status-badge" :class="productionStatus.emergencyStop ? 'danger' : 'success'">
-          {{ productionStatus.emergencyStop ? '🛑 急停中' : '✅ 正常' }}
-        </span>
-        <span class="status-badge" :class="productionStatus.isProductionRunning ? 'success' : 'idle'">
-          {{ productionStatus.isProductionRunning ? '▶️ 生产中' : '⏸️ 待产中' }}
-        </span>
         <span class="status-badge speed">
-          ⚡ 速度: {{ productionStatus.speed }} 个/分钟
+          ⚡ 车速: {{ productionStatus.speed }} 包/分钟
         </span>
       </div>
       <div class="update-time">
         🕐 {{ formatTime(productionStatus.updatedTime) }}
       </div>
     </div>
-    <div class="line-status-loading" v-else-if="loading">
+    <div class="line-status-loading" v-else>
       <span class="loading-dot"></span> 加载产线状态...
     </div>
 
@@ -53,34 +50,25 @@
         <div class="kpi-icon">📊</div>
         <div class="kpi-info">
           <span class="kpi-number">{{ detectors.length }}</span>
-          <span class="kpi-label">检测器总数</span>
+          <span class="kpi-label">读码器总数</span>
         </div>
         <div class="kpi-unit">台</div>
       </div>
 
       <div class="kpi-card">
-        <div class="kpi-icon online">🟢</div>
+        <div class="kpi-icon online">●</div>
         <div class="kpi-info">
-          <span class="kpi-number">{{ onlineCount }}</span>
-          <span class="kpi-label">在线数量</span>
+          <span class="kpi-number">{{ normalRunningCount }}</span>
+          <span class="kpi-label">正常运行</span>
         </div>
         <div class="kpi-unit">台</div>
       </div>
 
       <div class="kpi-card">
-        <div class="kpi-icon warning">⚠️</div>
+        <div class="kpi-icon fault">!</div>
         <div class="kpi-info">
-          <span class="kpi-number">{{ warningCount }}</span>
-          <span class="kpi-label">警告</span>
-        </div>
-        <div class="kpi-unit">台</div>
-      </div>
-
-      <div class="kpi-card">
-        <div class="kpi-icon danger">🔴</div>
-        <div class="kpi-info">
-          <span class="kpi-number">{{ dangerCount }}</span>
-          <span class="kpi-label">危险</span>
+          <span class="kpi-number">{{ abnormalCount }}</span>
+          <span class="kpi-label">异常</span>
         </div>
         <div class="kpi-unit">台</div>
       </div>
@@ -89,9 +77,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed } from 'vue'
 import ThemeToggle from './ThemeToggle.vue'
-import { productionApi } from '@/api/production'
 import type { ProductionStatus } from '@/types/production'
 import { RunStateMap } from '@/types/production'
 
@@ -100,62 +87,42 @@ const props = defineProps<{
   currentDate: string
   detectors: any[]
   threshold: { warning: number; danger: number }
+  isFullscreen?: boolean
+  productionStatus: ProductionStatus | null
+}>()
+
+const emit = defineEmits<{
+  toggleFullscreen: []
 }>()
 
 // 产线列表
 const lines = ref([
-  { id: 'LINE01', name: '产线一', icon: '🔧' },
-  { id: 'LINE02', name: '产线二', icon: '🔨' },
-  { id: 'LINE03', name: '产线三', icon: '⚙️' },
-  { id: 'LINE04', name: '产线四', icon: '📦' },
+  { id: 'LINE03', name: 'LINE03', icon: '📦' },
 ])
 
-const selectedLine = ref('LINE01')
-const productionStatus = ref<ProductionStatus | null>(null)
-const loading = ref(false)
-
-let refreshInterval: any
+const selectedLine = ref('LINE03')
 
 // 计算 KPI 数值
-const onlineCount = computed(() => props.detectors.filter(d => d.isConnected).length)
-const warningCount = computed(() => props.detectors.filter(d =>
-    d.displayValue >= props.threshold.warning && d.displayValue < props.threshold.danger
-).length)
-const dangerCount = computed(() => props.detectors.filter(d =>
-    d.displayValue >= props.threshold.danger
-).length)
+const normalRunningCount = computed(() => props.detectors.filter(d => d.status_code === 3).length)
+const abnormalCount = computed(() => props.detectors.length - normalRunningCount.value)
 
 // 产线切换
-const onLineChange = () => {
-  fetchProductionStatus()
-}
-
-// 获取生产状态
-const fetchProductionStatus = async () => {
-  try {
-    loading.value = true
-    productionStatus.value = await productionApi.getProductionStatus()
-  } catch (err: any) {
-    console.error('获取生产状态失败:', err)
-  } finally {
-    loading.value = false
-  }
-}
+const onLineChange = () => {}
 
 // 获取运行状态
 const getRunStateText = () => {
-  if (!productionStatus.value) return '未知'
-  return RunStateMap[productionStatus.value.runState]?.text || '未知'
+  if (!props.productionStatus) return '未知'
+  return RunStateMap[props.productionStatus.runState]?.text || '未知'
 }
 
 const getRunStateClass = () => {
-  if (!productionStatus.value) return ''
-  return RunStateMap[productionStatus.value.runState]?.color || ''
+  if (!props.productionStatus) return ''
+  return RunStateMap[props.productionStatus.runState]?.color || ''
 }
 
 const getRunStateIcon = () => {
-  if (!productionStatus.value) return '❓'
-  return RunStateMap[productionStatus.value.runState]?.icon || '❓'
+  if (!props.productionStatus) return '❓'
+  return RunStateMap[props.productionStatus.runState]?.icon || '❓'
 }
 
 // 格式化时间
@@ -164,19 +131,6 @@ const formatTime = (timeStr: string) => {
   return date.toLocaleTimeString('zh-CN', { hour12: false })
 }
 
-// 启动定时刷新
-const startRefresh = () => {
-  refreshInterval = setInterval(fetchProductionStatus, 5000)
-}
-
-onMounted(() => {
-  fetchProductionStatus()
-  startRefresh()
-})
-
-onUnmounted(() => {
-  if (refreshInterval) clearInterval(refreshInterval)
-})
 </script>
 
 <style scoped>
@@ -272,6 +226,26 @@ onUnmounted(() => {
   text-align: right;
 }
 
+.fullscreen-toggle {
+  flex-shrink: 0;
+  border: 1px solid var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: var(--transition);
+}
+
+.fullscreen-toggle:hover {
+  background: var(--primary);
+  color: var(--text-inverse);
+  box-shadow: var(--shadow-md);
+}
+
 .time {
   font-size: 22px;
   font-weight: 600;
@@ -361,7 +335,8 @@ onUnmounted(() => {
 
 /* KPI 卡片行 */
 .kpi-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 1px;
   background: var(--border-light);
   border-radius: 12px;
@@ -369,7 +344,6 @@ onUnmounted(() => {
 }
 
 .kpi-card {
-  flex: 1;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -390,7 +364,11 @@ onUnmounted(() => {
 
 .kpi-icon.online { background: rgba(45, 106, 79, 0.15); }
 .kpi-icon.warning { background: rgba(230, 160, 23, 0.15); }
-.kpi-icon.danger { background: rgba(220, 53, 69, 0.15); }
+.kpi-icon.fault { background: rgba(220, 53, 69, 0.15); }
+.kpi-icon.unknown { background: rgba(154, 174, 191, 0.15); }
+.kpi-icon.offline { background: rgba(173, 181, 189, 0.15); }
+.kpi-icon.connecting { background: rgba(74, 144, 226, 0.15); }
+.kpi-icon.maintenance { background: var(--primary-soft); }
 
 .kpi-info {
   flex: 1;

@@ -17,7 +17,7 @@
           </div>
           <div class="summary-stats">
             <div class="summary-item">
-              <span class="summary-label">当前值</span>
+              <span class="summary-label">当前间隔</span>
               <strong class="summary-value" :class="getValueClass">{{ (detector.displayValue || 0).toFixed(0) }}ms</strong>
             </div>
             <div class="summary-item">
@@ -39,15 +39,15 @@
           </div>
           <div class="info-row">
             <span class="info-label">产线</span>
-            <span class="info-value">{{ detector.lineName || '--' }}</span>
+            <span class="info-value">{{ detector.lineId || detector.lineName || '--' }}</span>
           </div>
           <div class="info-row">
-            <span class="info-label">品牌</span>
+            <span class="info-label">工控机</span>
+            <span class="info-value">{{ detector.ipcId || '--' }}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">读码器名称</span>
             <span class="info-value">{{ detector.stationName || detector.name || '--' }}</span>
-          </div>
-          <div class="info-row">
-            <span class="info-label">TCP端口</span>
-            <span class="info-value">{{ detector.tcpPort || '--' }}</span>
           </div>
           <div class="info-row">
             <span class="info-label">TCP连接</span>
@@ -56,13 +56,7 @@
             </span>
           </div>
           <div class="info-row">
-            <span class="info-label">Ping状态</span>
-            <span class="info-value" :class="detector.pingOk ? 'success' : 'danger'">
-              {{ detector.pingOk ? '正常' : '失败' }}
-            </span>
-          </div>
-          <div class="info-row">
-            <span class="info-label">Modbus状态</span>
+            <span class="info-label">温度连接</span>
             <span class="info-value" :class="detector.modbusOk ? 'success' : 'danger'">
               {{ detector.modbusOk ? '正常' : '异常' }}
             </span>
@@ -72,16 +66,8 @@
             <span class="info-value">{{ formatTime(detector.lastValidCodeTime || detector.lastReceiveTime) }}</span>
           </div>
           <div class="info-row">
-            <span class="info-label">最后码值</span>
-            <span class="info-value code">{{ detector.lastRawText || detector.lastCode || '--' }}</span>
-          </div>
-          <div class="info-row">
-            <span class="info-label">平均码间隔</span>
+            <span class="info-label">平均间隔</span>
             <span class="info-value">{{ (detector.recentAverageValidCodeIntervalMs || 0).toFixed(0) }}ms</span>
-          </div>
-          <div class="info-row">
-            <span class="info-label">触发次数</span>
-            <span class="info-value">{{ detector.lastTriggerIndex || 0 }}</span>
           </div>
           <div class="info-row">
             <span class="info-label">更新时间</span>
@@ -153,26 +139,14 @@ const getValueThreshold = (detector: any) => {
 
 // 获取状态文本
 const getStatusText = () => {
-  if (!props.detector) return 'UNKNOWN'
-  if (props.detector.isConnected) {
-    const val = props.detector.displayValue
-    const threshold = getValueThreshold(props.detector)
-    if (val >= threshold.danger) return '危险'
-    if (val >= threshold.warning) return '警告'
-    return '正常'
-  }
-  return '离线'
+  if (!props.detector) return '未知'
+  return props.detector.statusText || '未知'
 }
 
 // 获取状态样式类
 const getStatusClass = computed(() => {
   if (!props.detector) return ''
-  if (!props.detector.isConnected) return 'offline'
-  const val = props.detector.displayValue
-  const threshold = getValueThreshold(props.detector)
-  if (val >= threshold.danger) return 'danger'
-  if (val >= threshold.warning) return 'warning'
-  return 'normal'
+  return props.detector.status || 'unknown'
 })
 
 // 获取数值样式类
@@ -412,7 +386,19 @@ watch(() => props.detector, (newDetector) => {
   font-weight: 600;
 }
 
-.status-badge.normal {
+.status-badge.unknown {
+  background: rgba(154, 174, 191, 0.1);
+  color: var(--text-muted);
+}
+.status-badge.offline {
+  background: rgba(173, 181, 189, 0.1);
+  color: var(--border-heavy);
+}
+.status-badge.connecting {
+  background: rgba(74, 144, 226, 0.1);
+  color: var(--info);
+}
+.status-badge.online {
   background: rgba(45, 106, 79, 0.1);
   color: var(--success);
 }
@@ -420,13 +406,13 @@ watch(() => props.detector, (newDetector) => {
   background: rgba(230, 160, 23, 0.1);
   color: var(--warning);
 }
-.status-badge.danger {
+.status-badge.fault {
   background: rgba(220, 53, 69, 0.1);
   color: var(--danger);
 }
-.status-badge.offline {
-  background: rgba(173, 181, 189, 0.1);
-  color: var(--border-heavy);
+.status-badge.maintenance {
+  background: var(--primary-soft);
+  color: var(--primary);
 }
 
 .summary-stats {

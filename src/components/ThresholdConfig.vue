@@ -14,24 +14,6 @@
         </div>
 
         <div class="config-section">
-          <h4>解码耗时阈值 (ms)</h4>
-          <div class="slider-group">
-            <div class="slider-item">
-              <label>危险阈值</label>
-              <input
-                  type="range"
-                  v-model.number="localConfig.danger"
-                  min="0"
-                  max="200"
-                  step="1"
-                  @input="clearError"
-              />
-              <span class="value">{{ localConfig.danger }} ms</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="config-section">
           <h4>温度阈值 (°C)</h4>
           <div class="slider-group">
             <div class="slider-item">
@@ -79,13 +61,11 @@ const emit = defineEmits<{
 }>()
 
 export interface ThresholdConfig {
-  danger: number
   tempDanger: number
 }
 
 // 默认阈值
 const DEFAULT_CONFIG: ThresholdConfig = {
-  danger: 90,
   tempDanger: 60
 }
 
@@ -101,20 +81,11 @@ watch(
       if (!visible || !newDetector) return
 
       localConfig.value = {
-        danger: newDetector.customThreshold?.danger ?? DEFAULT_CONFIG.danger,
         tempDanger: newDetector.customTempThreshold?.danger ?? DEFAULT_CONFIG.tempDanger
       }
       errorMessage.value = ''
 
-      loadingTemperature.value = true
-      try {
-        localConfig.value.tempDanger = await readerApi.getReaderMaxTemperature(newDetector.id)
-      } catch (error) {
-        console.error('获取读码器温度阈值失败:', error)
-        errorMessage.value = '获取温度阈值失败，请稍后重试'
-      } finally {
-        loadingTemperature.value = false
-      }
+      loadingTemperature.value = false
     },
     { immediate: true }
 )
@@ -123,7 +94,6 @@ watch(
 watch(() => props.detector, (newDetector) => {
   if (newDetector && !props.visible) {
     localConfig.value = {
-      danger: newDetector.customThreshold?.danger ?? DEFAULT_CONFIG.danger,
       tempDanger: newDetector.customTempThreshold?.danger ?? DEFAULT_CONFIG.tempDanger
     }
   }
@@ -136,10 +106,6 @@ const clearError = () => {
 
 // 校验配置
 const validateConfig = (): boolean => {
-  if (localConfig.value.danger < 0) {
-    errorMessage.value = '解码耗时危险阈值不能小于 0'
-    return false
-  }
 
   if (localConfig.value.tempDanger < 0) {
     errorMessage.value = '温度危险阈值不能小于 0'
