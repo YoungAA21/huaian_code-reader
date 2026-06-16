@@ -3,7 +3,7 @@ export interface Alarm {
     workshopId: string
     lineId: string
     ipcId: string
-    readerId: string
+    readerId: string | null
     type: number
     level: number
     message: string

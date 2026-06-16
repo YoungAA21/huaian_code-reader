@@ -22,36 +22,21 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { applyTheme, getPreferredTheme } from '@/utils/theme'
 
 const isDark = ref(false)
 
-// 获取当前主题
-const getCurrentTheme = () => {
-  const savedTheme = localStorage.getItem('theme')
-  if (savedTheme) {
-    return savedTheme === 'dark'
-  }
-  return window.matchMedia('(prefers-color-scheme: dark)').matches
-}
-
-// 应用主题
-const applyTheme = (dark: boolean) => {
+const setTheme = (dark: boolean) => {
   isDark.value = dark
-  if (dark) {
-    document.documentElement.classList.add('dark-theme')
-  } else {
-    document.documentElement.classList.remove('dark-theme')
-  }
-  localStorage.setItem('theme', dark ? 'dark' : 'light')
+  applyTheme(dark ? 'dark' : 'light')
 }
 
-// 切换主题
 const toggleTheme = () => {
-  applyTheme(!isDark.value)
+  setTheme(!isDark.value)
 }
 
 onMounted(() => {
-  applyTheme(getCurrentTheme())
+  isDark.value = getPreferredTheme() === 'dark'
 })
 </script>
 

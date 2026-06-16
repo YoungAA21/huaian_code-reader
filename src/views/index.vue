@@ -12,7 +12,7 @@
     />
 
     <!-- 工控机状态卡片 -->
-    <IpcStatus />
+    <IpcStatus :realtime-status="ipcStatus" />
 
     <!-- 所有读码器网格 -->
     <div class="all-detectors-section">
@@ -38,6 +38,7 @@
       <DetectorGrid
           :detectors="detectors"
           :threshold="THRESHOLD"
+          :reader-runtimes="readerRuntimes"
           @open-detail="openDetail"
           @config-threshold="openThresholdConfig"
       />
@@ -58,9 +59,18 @@
             :key="item.index"
             class="io-item"
             :class="item.active ? 'active' : 'inactive'"
+            role="button"
+            tabindex="0"
+            @click="openIoHistory(item)"
+            @keydown.enter="openIoHistory(item)"
+            @keydown.space.prevent="openIoHistory(item)"
         >
           <span class="io-light"></span>
-          <span class="io-name">{{ item.label }}</span>
+          <span class="io-content">
+            <strong class="io-address">{{ item.address }}</strong>
+            <span class="io-name">{{ item.name }}</span>
+          </span>
+          <span class="io-state">{{ item.active ? 'ON' : 'OFF' }}</span>
         </div>
       </div>
     </div>
@@ -81,6 +91,12 @@
         @close="closeThresholdConfig"
         @save="saveThresholdConfig"
     />
+
+    <IoHistoryModal
+        :visible="ioHistoryVisible"
+        :point="selectedIoPoint"
+        @close="closeIoHistory"
+    />
   </div>
 </template>
 
@@ -92,15 +108,17 @@ import AlarmBar from '../components/AlarmBar.vue'
 import DetailModal from '../components/DetailModal.vue'
 import IpcStatus from '../components/IpcStatus.vue'
 import ThresholdConfig from '../components/ThresholdConfig.vue'
+import IoHistoryModal, { type IoPoint } from '../components/IoHistoryModal.vue'
 import type { ThresholdConfig as ThresholdConfigType } from '../components/ThresholdConfig.vue'
-import { alarmApi } from '@/api/alarm'
-import { readerApi } from '@/api/reader'
-import { productionApi } from '@/api/production'
 import type { Alarm } from '@/types/alarm'
 import type { ReaderStatus } from '@/types/reader'
 import { ReaderStatusMap } from '@/types/reader'
 import type {Detector} from "@/types/detection.ts";
 import type { ProductionStatus } from '@/types/production'
+import type { IpcStatus as IpcStatusType } from '@/types/ipc'
+import type { ReaderRuntime } from '@/types/runtime'
+import type { ProductionStateRealtime } from '@/types/realtime'
+import signalRService from '@/utils/signal'
 
 // ==================== 配置 ====================
 const THRESHOLD = { warning: 70, danger: 90 }
@@ -113,11 +131,33 @@ const detectors = ref<any[]>([])
 const selectedDetector = ref<any>(null)
 const latestAlarms = ref<any[]>([])
 const productionStatus = ref<ProductionStatus | null>(null)
+const ipcStatus = ref<IpcStatusType | null>(null)
+const readerRuntimes = ref<ReaderRuntime[]>([])
 const ioSignalValues = ref<boolean[]>([])
+const ioHistoryVisible = ref(false)
+const selectedIoPoint = ref<IoPoint | null>(null)
 const thresholdConfigVisible = ref(false)
 const configTargetDetector = ref<any>(null)
 const towerRef = ref<HTMLElement | null>(null)
 const isFullscreen = ref(false)
+const savedThresholds = JSON.parse(localStorage.getItem('device_thresholds') || '{}')
+let hasLoggedFirstSignalRPayload = false
+let lastSignalRLogTime = 0
+
+const IO_POINT_CONFIG = [
+  { point: 1, address: 'X2-2', name: '导轨2读码器拍照' },
+  { point: 3, address: 'X2-4', name: '条盒拍照信号' },
+  { point: 8, address: 'X2-9', name: '工控机开关信号' },
+  { point: 17, address: 'X4-2', name: '二维码系统故障' },
+  { point: 19, address: 'X4-4', name: '二维码启动信号' },
+  { point: 21, address: 'X4-6', name: '关联失败剔除' },
+  { point: 22, address: 'X4-7', name: '导轨1读码器拍照' },
+  { point: 23, address: 'X4-8', name: '条包移位信号' },
+  { point: 24, address: 'X4-9', name: '导轨1验码拍照' },
+  { point: 25, address: 'X5-2', name: '4#读码器拍照' },
+  { point: 26, address: 'X5-3', name: '备用' },
+  { point: 29, address: 'X5-6', name: 'HMI初始化信号' }
+] as const
 
 const toggleFullscreen = async () => {
   try {
@@ -137,12 +177,24 @@ const handleFullscreenChange = () => {
 
 const ioSignals = computed(() => {
   const signals = ioSignalValues.value
-  return Array.from({ length: 32 }, (_, index) => ({
-    index,
-    label: index + 1,
-    active: Boolean(signals[index])
+  return IO_POINT_CONFIG.map(item => ({
+    point: item.point,
+    index: item.point - 1,
+    address: item.address,
+    name: item.name,
+    active: Boolean(signals[item.point - 1])
   }))
 })
+
+const openIoHistory = (point: IoPoint) => {
+  selectedIoPoint.value = point
+  ioHistoryVisible.value = true
+}
+
+const closeIoHistory = () => {
+  ioHistoryVisible.value = false
+  selectedIoPoint.value = null
+}
 
 const updateIoSignals = (payload: any) => {
   const signals = Array.isArray(payload) ? payload : payload?.ioSignals
@@ -155,9 +207,10 @@ const updateIoSignals = (payload: any) => {
 const convertReaderToDetector = (reader: ReaderStatus): Detector => {
   const statusMeta = ReaderStatusMap[reader.status] || ReaderStatusMap[0]
   const isOnline = reader.status === 3
+  const savedThreshold = savedThresholds[reader.readerId]
 
-  const displayValue = reader.lastValidCodeIntervalMs || 0
-  const temperature = reader.currentTemperature || 0
+  const displayValue = reader.lastValidCodeIntervalMs ?? 0
+  const temperature = reader.currentTemperature ?? 0
 
   return {
     // 基础信息
@@ -196,8 +249,8 @@ const convertReaderToDetector = (reader: ReaderStatus): Detector => {
     updatedTime: reader.updatedTime,
 
     // 计数相关
-    lastTriggerIndex: reader.recentIntervalCount || 0,
-    lastTotalTime: reader.lastValidCodeIntervalMs || 0,
+    lastTriggerIndex: reader.recentIntervalCount ?? 0,
+    lastTotalTime: reader.lastValidCodeIntervalMs ?? 0,
     recentIntervalCount: reader.recentIntervalCount,
     lastValidCodeIntervalMs: reader.lastValidCodeIntervalMs,
     recentAverageValidCodeIntervalMs: reader.recentAverageValidCodeIntervalMs,
@@ -231,16 +284,26 @@ const convertReaderToDetector = (reader: ReaderStatus): Detector => {
     valueBuffer: [displayValue],
     lastRenderTime: Date.now(),
 
+    customThreshold: savedThreshold ? {
+      warning: savedThreshold.warning ?? THRESHOLD.warning,
+      danger: savedThreshold.danger
+    } : undefined,
+    customTempThreshold: savedThreshold ? {
+      warning: savedThreshold.tempWarning ?? 45,
+      danger: savedThreshold.tempDanger ?? 60
+    } : undefined,
+
     // 原始数据
     rawReader: reader
   }
 }
 
-// 从 API 获取所有读码器状态
-const fetchReadersStatus = async () => {
-  try {
-    const readers = await readerApi.getReadersStatus()
-    if (readers && readers.length > 0) {
+const updateReadersStatus = (readers: ReaderStatus[]) => {
+  if (!readers || readers.length === 0) {
+    detectors.value = []
+    return
+  }
+
       const newDetectors = readers.map(convertReaderToDetector)
 
       // 保留原有的自定义阈值和告警历史
@@ -277,37 +340,37 @@ const fetchReadersStatus = async () => {
             newDetector.lineName = oldDetector.lineName || oldDetector.lineId
           }
 
-          // 更新趋势数据
-          if (newDetector.trendData.length > MAX_TREND_POINTS) {
-            newDetector.trendData.shift()
-          }
-          newDetector.trendData.push(newDetector.temperature)
+          if (newDetector.updatedTime !== oldDetector.updatedTime) {
+            newDetector.trendData.push(newDetector.temperature)
+            if (newDetector.trendData.length > MAX_TREND_POINTS) {
+              newDetector.trendData.splice(0, newDetector.trendData.length - MAX_TREND_POINTS)
+            }
 
-          // 计算趋势
-          const lastValue = oldDetector.temperature ?? newDetector.temperature
-          newDetector.trend = newDetector.temperature - lastValue
-          if (lastValue !== 0) {
-            newDetector.changeRate = (newDetector.trend / Math.abs(lastValue)) * 100
-          }
-          newDetector.lastValue = newDetector.displayValue
+            const lastValue = oldDetector.temperature ?? newDetector.temperature
+            newDetector.trend = newDetector.temperature - lastValue
+            if (lastValue !== 0) {
+              newDetector.changeRate = (newDetector.trend / Math.abs(lastValue)) * 100
+            }
 
-          // 更新最大最小值
-          newDetector.maxValue = Math.max(newDetector.displayValue, oldDetector.maxValue || newDetector.displayValue)
-          newDetector.minValue = Math.min(newDetector.displayValue, oldDetector.minValue || newDetector.displayValue)
-
-          // 计算平均值
-          const allValues = [...(oldDetector.valueBuffer || []), newDetector.displayValue]
-          if (allValues.length > 0) {
-            newDetector.avgValue = allValues.reduce((a, b) => a + b, 0) / allValues.length
+            newDetector.valueBuffer.push(newDetector.displayValue)
+            newDetector.maxValue = Math.max(newDetector.displayValue, oldDetector.maxValue ?? newDetector.displayValue)
+            newDetector.minValue = Math.min(newDetector.displayValue, oldDetector.minValue ?? newDetector.displayValue)
+          } else {
+            newDetector.trend = oldDetector.trend
+            newDetector.changeRate = oldDetector.changeRate
+            newDetector.maxValue = oldDetector.maxValue
+            newDetector.minValue = oldDetector.minValue
+            newDetector.avgValue = oldDetector.avgValue
           }
+          newDetector.lastValue = oldDetector.displayValue
         }
       })
 
       detectors.value = newDetectors
-    }
-  } catch (error) {
-    console.error('获取读码器状态失败:', error)
-  }
+
+      if (configTargetDetector.value) {
+        configTargetDetector.value = newDetectors.find(d => d.id === configTargetDetector.value.id) || null
+      }
 }
 
 // ==================== 告警数据转换函数 ====================
@@ -336,51 +399,28 @@ const convertApiAlarmToComponentFormat = (apiAlarm: Alarm) => {
   }
 }
 
-// 从 API 获取活跃告警
-const fetchActiveAlarms = async () => {
-  try {
-    const alarms = await alarmApi.getActiveAlarms()
-    if (alarms && alarms.length > 0) {
-      latestAlarms.value = alarms.map(convertApiAlarmToComponentFormat)
-    } else {
-      latestAlarms.value = []
-    }
-  } catch (error) {
-    console.error('获取活跃告警失败:', error)
+const handleProductionState = (snapshot: ProductionStateRealtime) => {
+  const now = Date.now()
+  if (!hasLoggedFirstSignalRPayload) {
+    console.log('[SignalR] productionState:', snapshot)
+    hasLoggedFirstSignalRPayload = true
+    lastSignalRLogTime = now
+  } else if (now - lastSignalRLogTime >= 60000) {
+    console.log('[SignalR] 通讯正常:', {
+      updatedTime: snapshot.updatedTime,
+      runState: snapshot.runState,
+      readerCount: snapshot.readers?.length ?? 0,
+      alarmCount: snapshot.activeAlarms?.length ?? 0
+    })
+    lastSignalRLogTime = now
   }
-}
+  productionStatus.value = snapshot
+  ipcStatus.value = snapshot.ipc
+  readerRuntimes.value = snapshot.readerRuntimes || []
+  latestAlarms.value = (snapshot.activeAlarms || []).map(convertApiAlarmToComponentFormat)
+  updateIoSignals(snapshot)
+  updateReadersStatus(snapshot.readers || [])
 
-// 从 API 获取生产状态，用于顶部产线状态
-let productionStatusLoading = false
-const fetchProductionStatus = async () => {
-  if (productionStatusLoading) return
-  productionStatusLoading = true
-  try {
-    const status = await productionApi.getProductionStatus()
-    productionStatus.value = status
-    updateIoSignals(status)
-  } catch (error) {
-    console.error('获取生产状态失败:', error)
-  } finally {
-    productionStatusLoading = false
-  }
-}
-
-// 定时刷新读码器状态
-let readersRefreshInterval: any
-const startReadersRefresh = () => {
-  readersRefreshInterval = setInterval(fetchReadersStatus, 3000) // 每3秒刷新一次
-}
-
-// 定时刷新告警
-let alarmRefreshInterval: any
-const startAlarmRefresh = () => {
-  alarmRefreshInterval = setInterval(fetchActiveAlarms, 5000)
-}
-
-let productionRefreshInterval: any
-const startProductionRefresh = () => {
-  productionRefreshInterval = setInterval(fetchProductionStatus, 1000)
 }
 
 const clearAllAlarms = () => {
@@ -411,7 +451,15 @@ const updateStatistics = () => {
 }
 
 // ==================== 阈值配置 ====================
-const openDetail = (detector: any) => { selectedDetector.value = detector }
+const openDetail = (detector: any) => {
+  selectedDetector.value = {
+    ...detector,
+    alarms: [...(detector.alarms || [])],
+    trendData: [...(detector.trendData || [])],
+    valueBuffer: [...(detector.valueBuffer || [])],
+    rawReader: detector.rawReader ? { ...detector.rawReader } : detector.rawReader
+  }
+}
 const closeDetail = () => { selectedDetector.value = null }
 
 const openThresholdConfig = (detector: any) => {
@@ -433,63 +481,39 @@ const saveThresholdConfig = (detectorId: string, config: ThresholdConfigType) =>
       danger: config.tempDanger
     }
 
-    const allConfigs = JSON.parse(localStorage.getItem('device_thresholds') || '{}')
-    allConfigs[detectorId] = config
-    localStorage.setItem('device_thresholds', JSON.stringify(allConfigs))
+    savedThresholds[detectorId] = config
+    localStorage.setItem('device_thresholds', JSON.stringify(savedThresholds))
   }
-}
-
-const loadThresholdFromLocal = (detector: any) => {
-  const allConfigs = JSON.parse(localStorage.getItem('device_thresholds') || '{}')
-  const saved = allConfigs[detector.id]
-  if (saved) {
-    detector.customThreshold = {
-      warning: saved.warning ?? THRESHOLD.warning,
-      danger: saved.danger
-    }
-    detector.customTempThreshold = {
-      warning: saved.tempWarning ?? 45,
-      danger: saved.tempDanger ?? 60
-    }
-  }
-}
-
-// 为现有 detectors 加载阈值
-const loadAllThresholds = () => {
-  detectors.value.forEach(detector => {
-    loadThresholdFromLocal(detector)
-  })
 }
 
 // ==================== 生命周期 ====================
 let statsInterval: any
+let clockInterval: any
 
 onMounted(async () => {
   document.addEventListener('fullscreenchange', handleFullscreenChange)
   formatTime()
-  setInterval(formatTime, 1000)
+  clockInterval = setInterval(formatTime, 1000)
 
-  // 初始化：获取读码器状态和告警
-  await fetchReadersStatus()
-  await fetchActiveAlarms()
-  await fetchProductionStatus()
+  signalRService.buildConnection(
+      import.meta.env.VITE_SIGNALR_HUB_URL || '/hubs/production-state'
+  )
+  signalRService.on<ProductionStateRealtime>('productionState', handleProductionState)
+  try {
+    await signalRService.start()
+  } catch (error) {
+    console.error('SignalR 实时监测连接失败:', error)
+  }
 
-  // 加载保存的阈值配置
-  loadAllThresholds()
-
-  // 启动定时刷新
-  startReadersRefresh()
-  startAlarmRefresh()
-  startProductionRefresh()
   statsInterval = setInterval(updateStatistics, 2000)
 })
 
-onUnmounted(() => {
+onUnmounted(async () => {
   document.removeEventListener('fullscreenchange', handleFullscreenChange)
+  clearInterval(clockInterval)
   clearInterval(statsInterval)
-  clearInterval(readersRefreshInterval)
-  clearInterval(alarmRefreshInterval)
-  clearInterval(productionRefreshInterval)
+  signalRService.off('productionState', handleProductionState)
+  await signalRService.stop()
 })
 </script>
 
@@ -676,27 +700,68 @@ body {
 
 .io-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 14px;
 }
 
 .io-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-height: 42px;
-  padding: 8px 12px;
+  gap: 10px;
+  min-width: 0;
+  min-height: 72px;
+  padding: 12px 14px;
   background: var(--bg-card);
   border: 1px solid var(--border-light);
-  border-radius: 8px;
+  border-radius: 12px;
   color: var(--text-secondary);
-  font-size: 15px;
-  font-weight: 600;
+  box-shadow: var(--shadow-sm);
+  transition: var(--transition);
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.io-item::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 4px;
+}
+
+.io-item.active {
+  border-color: rgba(45, 106, 79, 0.35);
+  background: linear-gradient(135deg, var(--bg-card), rgba(45, 106, 79, 0.08));
+}
+
+.io-item.inactive {
+  border-color: rgba(220, 53, 69, 0.24);
+  background: linear-gradient(135deg, var(--bg-card), rgba(220, 53, 69, 0.05));
+}
+
+.io-item.active::before {
+  background: var(--success);
+}
+
+.io-item.inactive::before {
+  background: var(--danger);
+}
+
+.io-item:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.io-item:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
 }
 
 .io-light {
-  width: 12px;
-  height: 12px;
+  width: 13px;
+  height: 13px;
   border-radius: 50%;
   flex-shrink: 0;
   box-shadow: 0 0 0 3px rgba(173, 181, 189, 0.12);
@@ -704,16 +769,70 @@ body {
 
 .io-item.active .io-light {
   background: var(--success);
-  box-shadow: 0 0 0 3px rgba(45, 106, 79, 0.14);
+  box-shadow: 0 0 0 4px rgba(45, 106, 79, 0.13), 0 0 10px rgba(45, 106, 79, 0.35);
 }
 
 .io-item.inactive .io-light {
   background: var(--danger);
-  box-shadow: 0 0 0 3px rgba(220, 53, 69, 0.14);
+  box-shadow: 0 0 0 4px rgba(220, 53, 69, 0.1);
+}
+
+.io-content {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.io-address {
+  color: var(--text-primary);
+  font-family: 'SF Mono', 'JetBrains Mono', monospace;
+  font-size: 16px;
+  line-height: 1;
 }
 
 .io-name {
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.io-state {
+  flex-shrink: 0;
+  min-width: 34px;
+  padding: 3px 6px;
+  border-radius: 10px;
   font-family: 'SF Mono', 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.io-item.active .io-state {
+  color: var(--success);
+  background: rgba(45, 106, 79, 0.12);
+}
+
+.io-item.inactive .io-state {
+  color: var(--danger);
+  background: rgba(220, 53, 69, 0.1);
+}
+
+@media (max-width: 1400px) {
+  .io-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .io-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 768px) {
@@ -735,6 +854,9 @@ body {
   }
   .section-title h2 {
     font-size: 22px;
+  }
+  .io-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

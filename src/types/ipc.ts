@@ -5,12 +5,20 @@ export interface IpcStatus {
     ipcId: string
     time: string
     agentOnline: boolean
+    machineName: string
+    osDescription: string
+    processorCount: number
     processId: number
+    processName: string
     appCpuUsagePercent: number
     appMemoryMb: number
+    appPrivateMemoryMb: number
     systemCpuUsagePercent: number
     systemMemoryUsagePercent: number
+    systemAvailableMemoryMb: number
+    systemTotalMemoryMb: number
     appUptimeHours: number
+    systemUptimeHours: number
     diskPath: string
     diskFreeGb: number
     diskTotalGb: number
@@ -27,12 +35,20 @@ export interface IpcHistoryItem {
     ipcId: string
     time: string
     agentOnline: boolean
+    machineName: string
+    osDescription: string
+    processorCount: number
     processId: number
+    processName: string
     appCpuUsagePercent: number
     appMemoryMb: number
+    appPrivateMemoryMb: number
     systemCpuUsagePercent: number
     systemMemoryUsagePercent: number
+    systemAvailableMemoryMb: number
+    systemTotalMemoryMb: number
     appUptimeHours: number
+    systemUptimeHours: number
     diskPath: string
     diskFreeGb: number
     diskTotalGb: number

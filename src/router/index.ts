@@ -7,6 +7,11 @@ const routes = [
         name: 'Home',
         component: index
     },
+    {
+        path: '/reader-trends',
+        name: 'ReaderTrends',
+        component: () => import('../views/ReaderTrends.vue')
+    },
     // 如果以后有其他页面，可以继续添加
     // {
     //   path: '/about',

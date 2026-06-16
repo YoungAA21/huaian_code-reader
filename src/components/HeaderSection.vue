@@ -15,6 +15,7 @@
             </option>
           </select>
         </div>
+        <RouterLink class="trend-entry" to="/reader-trends">趋势对比</RouterLink>
         <ThemeToggle />
         <div class="datetime-area">
           <div class="time">{{ currentTime }}</div>
@@ -238,6 +239,26 @@ const formatTime = (timeStr: string) => {
   cursor: pointer;
   box-shadow: var(--shadow-sm);
   transition: var(--transition);
+}
+
+.trend-entry {
+  flex-shrink: 0;
+  border: 1px solid var(--primary);
+  background: var(--primary);
+  color: var(--text-inverse);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+  box-shadow: var(--shadow-sm);
+  transition: var(--transition);
+}
+
+.trend-entry:hover {
+  background: var(--primary-soft);
+  color: var(--primary);
+  box-shadow: var(--shadow-md);
 }
 
 .fullscreen-toggle:hover {

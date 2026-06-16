@@ -125,17 +125,19 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, watch } from 'vue'
 import { ipcApi } from '@/api/ipc'
 import type { IpcStatus, IpcHistoryItem } from '@/types/ipc'
 
-const ipcStatus = ref<IpcStatus | null>(null)
+const props = defineProps<{
+  realtimeStatus: IpcStatus | null
+}>()
+
+const ipcStatus = ref<IpcStatus | null>(props.realtimeStatus)
 const historyItems = ref<IpcHistoryItem[]>([])
 const loading = ref(false)
 const error = ref('')
 const showHistory = ref(false)
-
-let refreshInterval: any
 
 // 获取工控机状态
 const fetchIpcStatus = async () => {
@@ -208,22 +210,15 @@ const getHealthClass = (health: number) => {
   return 'danger'
 }
 
-// 启动定时刷新
-const startRefresh = () => {
-  refreshInterval = setInterval(fetchIpcStatus, 10000) // 每10秒刷新一次
-}
-
-onMounted(() => {
-  fetchIpcStatus()
-  startRefresh()
-})
-
-onUnmounted(() => {
-  if (refreshInterval) clearInterval(refreshInterval)
-})
-
 // 监听历史展开
-import { watch } from 'vue'
+watch(() => props.realtimeStatus, (status) => {
+  if (status) {
+    ipcStatus.value = status
+    loading.value = false
+    error.value = ''
+  }
+}, { immediate: true })
+
 watch(showHistory, (newVal) => {
   if (newVal && historyItems.value.length === 0) {
     fetchIpcHistory()

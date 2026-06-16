@@ -1,5 +1,10 @@
 import request from '@/utils/request'
-import type { ReaderSettings, ReaderStatus, UpdateReaderMaxTemperatureParams } from '@/types/reader'
+import type {
+    ReaderSettings,
+    ReaderSnapshotsResponse,
+    ReaderStatus,
+    UpdateReaderMaxTemperatureParams,
+} from '@/types/reader'
 
 export const readerApi = {
     /**
@@ -46,6 +51,21 @@ export const readerApi = {
             url: `/api/reader-settings/${readerId}/max-temperature`,
             method: 'PUT',
             data: params,
+        })
+    },
+
+    getReaderRecentSnapshots(params: {
+        readerId: string
+        startTime: string
+        endTime: string
+    }): Promise<ReaderSnapshotsResponse> {
+        return request({
+            url: '/api/status-snapshots/readers',
+            method: 'GET',
+            params: {
+                ...params,
+                limit: 10000,
+            },
         })
     },
 }

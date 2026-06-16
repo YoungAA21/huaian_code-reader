@@ -19,10 +19,10 @@ export interface ReaderStatus {
     lastHeartbeatTime: string | null
     lastReceiveType: number
     lastRawText: string | null
-    lastValidCodeIntervalMs: number
-    recentAverageValidCodeIntervalMs: number
+    lastValidCodeIntervalMs: number | null
+    recentAverageValidCodeIntervalMs: number | null
     recentIntervalCount: number
-    currentTemperature: number
+    currentTemperature: number | null
     status: number  // 0-未知，1-离线，2-连接中，3-在线，4-警告，5-故障，6-维护
     message: string
     updatedTime: string
@@ -49,6 +49,37 @@ export interface UpdateReaderMaxTemperatureParams {
     maxTemperature: number
     updatedBy: string
     remark: string
+}
+
+export interface ReaderSnapshot {
+    id: number
+    workshopId: string
+    lineId: string
+    ipcId: string
+    readerId: string
+    readerName: string
+    time: string
+    tcpConnected: boolean
+    pingOk: boolean
+    modbusOk: boolean
+    currentTemperature: number | null
+    lastReceiveType: number
+    lastRawText: string | null
+    lastReceiveTime: string | null
+    lastBusinessResultTime: string | null
+    lastValidCodeTime: string | null
+    lastHeartbeatTime: string | null
+    lastValidCodeIntervalMs: number | null
+    recentAverageValidCodeIntervalMs: number | null
+    recentIntervalCount: number
+    status: number
+    message: string
+    createdTime: string
+}
+
+export interface ReaderSnapshotsResponse {
+    count: number
+    items: ReaderSnapshot[]
 }
 
 // 读码器状态映射

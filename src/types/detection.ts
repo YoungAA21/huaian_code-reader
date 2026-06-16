@@ -83,8 +83,8 @@ export interface Detector {
     lastTriggerIndex: number
     lastTotalTime: number
     recentIntervalCount?: number
-    lastValidCodeIntervalMs?: number
-    recentAverageValidCodeIntervalMs?: number
+    lastValidCodeIntervalMs?: number | null
+    recentAverageValidCodeIntervalMs?: number | null
 
     // 码值相关
     lastCode: string

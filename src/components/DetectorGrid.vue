@@ -87,6 +87,30 @@
           </strong>
         </div>
 
+        <div
+            v-if="getReplacementStatus(detector.id)?.hasReplacementRecord"
+            class="replacement-status replaced"
+        >
+          <span>备件已更换</span>
+          <strong>{{ formatInstalledDays(getReplacementStatus(detector.id)?.installedDays) }}</strong>
+        </div>
+        <div
+            v-else-if="getReplacementStatus(detector.id)"
+            class="replacement-status pending"
+        >
+          <span>需要更换备件</span>
+          <button
+              class="replacement-btn"
+              @click.stop="confirmReplacement(detector)"
+              :disabled="replacementSubmittingId === detector.id"
+          >
+            {{ replacementSubmittingId === detector.id ? '更换中...' : '更换备件' }}
+          </button>
+        </div>
+        <div v-else class="replacement-status loading">
+          <span>{{ replacementStatusLoading ? '备件状态加载中...' : '备件状态未知' }}</span>
+        </div>
+
         <!-- 重启按钮 - 仅在需要重启提醒时显示 -->
         <div v-if="needsRestart(detector.id)" class="restart-area">
           <button class="restart-btn" @click.stop="openRestartConfirm(detector)">
@@ -159,11 +183,14 @@
 import { ref, onMounted, onUnmounted, watch, reactive, nextTick } from 'vue'
 import DecodeRecordsModal from './DecodeRecordsModal.vue'
 import { runtimeApi } from '@/api/runtime'
+import { replacementApi } from '@/api/replacement'
 import type { ReaderRuntime } from '@/types/runtime'
+import type { ReaderReplacementStatus } from '@/types/replacement'
 
 const props = defineProps<{
   detectors: any[]
   threshold: { warning: number; danger: number }
+  readerRuntimes: ReaderRuntime[]
 }>()
 
 // 解码记录 Modal 状态
@@ -186,6 +213,60 @@ const restartReminderIds = ref<Set<string>>(new Set())
 
 // 存储每个读码器的运行时长信息
 const runtimeMap = reactive<Map<string, ReaderRuntime>>(new Map())
+const replacementStatusMap = reactive<Map<string, ReaderReplacementStatus>>(new Map())
+const replacementSubmittingId = ref<string | null>(null)
+const replacementStatusLoading = ref(false)
+let replacementRefreshInterval: ReturnType<typeof setInterval> | null = null
+
+const fetchReplacementStatus = async () => {
+  if (replacementStatusLoading.value) return
+
+  replacementStatusLoading.value = true
+  try {
+    const response = await replacementApi.getAllStatus()
+    const currentIds = new Set<string>()
+    response.items.forEach((status) => {
+      currentIds.add(status.readerId)
+      replacementStatusMap.set(status.readerId, status)
+    })
+    for (const readerId of replacementStatusMap.keys()) {
+      if (!currentIds.has(readerId)) replacementStatusMap.delete(readerId)
+    }
+  } catch (error) {
+    console.error('获取读码器备件状态失败:', error)
+  } finally {
+    replacementStatusLoading.value = false
+  }
+}
+
+const getReplacementStatus = (readerId: string) => {
+  return replacementStatusMap.get(readerId)
+}
+
+const formatInstalledDays = (days: number | null | undefined) => {
+  if (days === null || days === undefined) return ''
+  return `已使用 ${days.toFixed(1)} 天`
+}
+
+const confirmReplacement = async (detector: any) => {
+  if (replacementSubmittingId.value) return
+
+  replacementSubmittingId.value = detector.id
+  try {
+    const result = await replacementApi.recordReplacement(detector.id, {
+      replacementTime: new Date().toISOString(),
+      replacedBy: '操作员',
+      remark: '页面一键更换备件'
+    })
+    replacementStatusMap.set(result.status.readerId, result.status)
+    alert(result.message)
+  } catch (error: any) {
+    console.error('更换备件失败:', error)
+    alert(`更换备件失败：${error.response?.data?.message || error.message || '未知错误'}`)
+  } finally {
+    replacementSubmittingId.value = null
+  }
+}
 
 const applyRuntimeToDetector = (runtime: ReaderRuntime) => {
   const detector = props.detectors.find(d => d.id === runtime.readerId)
@@ -219,56 +300,9 @@ const closeDecodeRecords = () => {
   selectedDetector.value = null
 }
 
-// 获取需要重启提醒的读码器列表
-const fetchRestartReminders = async () => {
-  try {
-    const response = await runtimeApi.getRestartReminders()
-    restartReminderIds.value.clear()
-    if (response.readers && response.readers.length > 0) {
-      response.readers.forEach(reader => {
-        restartReminderIds.value.add(reader.readerId)
-        // 同时更新运行时长信息
-        runtimeMap.set(reader.readerId, reader)
-        applyRuntimeToDetector(reader)
-      })
-    }
-  } catch (error) {
-    console.error('获取重启提醒列表失败:', error)
-  }
-}
-
 // 判断读码器是否需要重启
 const needsRestart = (readerId: string) => {
   return restartReminderIds.value.has(readerId)
-}
-
-// 获取读码器运行时长
-const fetchReaderRuntime = async (readerId: string) => {
-  try {
-    const runtime = await runtimeApi.getReaderRuntime(readerId)
-    runtimeMap.set(readerId, runtime)
-    applyRuntimeToDetector(runtime)
-  } catch (error) {
-    console.error(`获取读码器 ${readerId} 运行时长失败:`, error)
-  }
-}
-
-// 批量获取所有读码器运行时长
-const fetchAllRuntimes = async () => {
-  for (const detector of props.detectors) {
-    await fetchReaderRuntime(detector.id)
-  }
-}
-
-const fetchMissingRuntimes = async () => {
-  for (const detector of props.detectors) {
-    const runtime = runtimeMap.get(detector.id)
-    if (runtime) {
-      applyRuntimeToDetector(runtime)
-    } else {
-      await fetchReaderRuntime(detector.id)
-    }
-  }
 }
 
 // 获取运行时长小时数
@@ -366,6 +400,7 @@ const animationMap = new Map<string, number>()
 
 const setCanvasRef = (id: string) => (el: any) => {
   if (el) canvasMap.set(id, el)
+  else canvasMap.delete(id)
 }
 
 const drawChart = (detector: any, canvas: HTMLCanvasElement) => {
@@ -450,37 +485,36 @@ const formatMs = (value: number | null | undefined) => {
   return `${Number(value).toFixed(0)}ms`
 }
 
-let runtimeRefreshInterval: any
-
-const refreshRuntimeState = async () => {
-  await fetchRestartReminders()
-  await fetchAllRuntimes()
-}
-
-const startRuntimeRefresh = () => {
-  runtimeRefreshInterval = setInterval(refreshRuntimeState, 60000)
-}
-
-// 监听 detectors 变化，只为新出现的读码器补运行时长，避免随列表 3 秒刷新高频请求 runtime 接口
 watch(() => props.detectors, (newDetectors) => {
   if (newDetectors && newDetectors.length > 0) {
-    fetchMissingRuntimes()
+    runtimeMap.forEach(applyRuntimeToDetector)
     nextTick(drawAllCharts)
   }
-}, { deep: true, immediate: true })
+}, { immediate: true })
+
+watch(() => props.readerRuntimes, (runtimes) => {
+  runtimeMap.clear()
+  restartReminderIds.value.clear()
+  runtimes.forEach((runtime) => {
+    runtimeMap.set(runtime.readerId, runtime)
+    if (runtime.reminderActive) {
+      restartReminderIds.value.add(runtime.readerId)
+    }
+    applyRuntimeToDetector(runtime)
+  })
+}, { immediate: true })
 
 onMounted(() => {
-  // 获取需要重启提醒的读码器列表
-  refreshRuntimeState()
-  startRuntimeRefresh()
-
   setTimeout(drawAllCharts, 100)
+  void fetchReplacementStatus()
+  replacementRefreshInterval = setInterval(fetchReplacementStatus, 60000)
 })
 
 onUnmounted(() => {
-  if (runtimeRefreshInterval) clearInterval(runtimeRefreshInterval)
+  if (replacementRefreshInterval) clearInterval(replacementRefreshInterval)
   animationMap.forEach(id => cancelAnimationFrame(id))
   animationMap.clear()
+  canvasMap.clear()
 })
 </script>
 
@@ -762,6 +796,62 @@ onUnmounted(() => {
 
 .runtime-value.danger {
   color: var(--danger);
+}
+
+.replacement-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 38px;
+  margin: 8px 0;
+  padding: 7px 10px;
+  border-radius: 9px;
+  font-size: 13px;
+}
+
+.replacement-status.replaced {
+  color: var(--success);
+  background: rgba(45, 106, 79, 0.09);
+  border: 1px solid rgba(45, 106, 79, 0.2);
+}
+
+.replacement-status.replaced strong {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.replacement-status.pending {
+  color: var(--warning);
+  background: rgba(230, 160, 23, 0.09);
+  border: 1px solid rgba(230, 160, 23, 0.24);
+}
+
+.replacement-status.loading {
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-light);
+}
+
+.replacement-btn {
+  border: none;
+  color: white;
+  background: var(--warning);
+  border-radius: 7px;
+  padding: 6px 11px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.replacement-btn:hover {
+  filter: brightness(0.93);
+}
+
+.replacement-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 /* 重启按钮区域 */
