@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div v-if="detector" class="modal-overlay" @click="handleClose">
     <div class="modal-container" @click.stop>
       <div class="modal-header">
@@ -10,28 +10,34 @@
       </div>
 
       <div class="modal-body">
-        <!-- 状态摘要 -->
         <div class="summary-section">
           <div class="status-badge" :class="getStatusClass">
             {{ getStatusText() }}
           </div>
           <div class="summary-stats">
+            <div class="summary-item primary">
+              <span class="summary-label">修正成功率</span>
+              <strong class="summary-value" :class="getTriggerHealthClass">{{ formatPercent(detector.triggerEffectiveSuccessRate) }}</strong>
+            </div>
             <div class="summary-item">
-              <span class="summary-label">当前间隔</span>
-              <strong class="summary-value" :class="getValueClass">{{ (detector.displayValue || 0).toFixed(0) }}ms</strong>
+              <span class="summary-label">严格成功率</span>
+              <strong class="summary-value">{{ formatPercent(detector.triggerSuccessRate) }}</strong>
             </div>
             <div class="summary-item">
               <span class="summary-label">设备温度</span>
-              <strong class="summary-value" :class="getTempClass">{{ (detector.temperature || 0).toFixed(1) }}°C</strong>
+              <strong class="summary-value" :class="getTempClass">{{ formatTemperature(detector.temperature) }}</strong>
             </div>
           </div>
         </div>
 
-        <!-- 基本信息网格 -->
-        <div class="info-grid">
+        <div class="info-grid realtime-grid">
           <div class="info-row">
             <span class="info-label">设备ID</span>
             <span class="info-value">{{ detector.id || '--' }}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">读码器名称</span>
+            <span class="info-value">{{ detector.stationName || detector.name || '--' }}</span>
           </div>
           <div class="info-row">
             <span class="info-label">设备IP</span>
@@ -41,13 +47,39 @@
             <span class="info-label">产线</span>
             <span class="info-value">{{ detector.lineId || detector.lineName || '--' }}</span>
           </div>
-          <div class="info-row">
-            <span class="info-label">工控机</span>
-            <span class="info-value">{{ detector.ipcId || '--' }}</span>
+          <div class="info-row important">
+            <span class="info-label">延迟补码率</span>
+            <span class="info-value">{{ formatPercent(detector.triggerLateRecoveredRate) }}</span>
+          </div>
+          <div class="info-row important">
+            <span class="info-label">补码数</span>
+            <span class="info-value">{{ formatCount(detector.triggerLateRecoveredCount) }}</span>
+          </div>
+          <div class="info-row important">
+            <span class="info-label">待补NoResult</span>
+            <span class="info-value" :class="detector.triggerPendingNoResultCount > 0 ? 'warning' : ''">
+              {{ formatCount(detector.triggerPendingNoResultCount) }}
+            </span>
+          </div>
+          <div class="info-row important">
+            <span class="info-label">最近跨周期</span>
+            <span class="info-value">{{ formatCycleOffset(detector.triggerLastLateOffsetCycles) }}</span>
           </div>
           <div class="info-row">
-            <span class="info-label">读码器名称</span>
-            <span class="info-value">{{ detector.stationName || detector.name || '--' }}</span>
+            <span class="info-label">触发周期</span>
+            <span class="info-value">{{ formatMs(detector.triggerLastIntervalMs) }}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">有效码延时</span>
+            <span class="info-value">{{ formatMs(detector.triggerLastSuccessDelayMs) }}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">读码返回间隔</span>
+            <span class="info-value">{{ formatMs(detector.triggerLastReceiveIntervalMs) }}</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">最近有效码间隔</span>
+            <span class="info-value">{{ formatMs(detector.lastValidCodeIntervalMs) }}</span>
           </div>
           <div class="info-row">
             <span class="info-label">TCP连接</span>
@@ -56,31 +88,32 @@
             </span>
           </div>
           <div class="info-row">
-            <span class="info-label">温度连接</span>
+            <span class="info-label">Ping</span>
+            <span class="info-value" :class="detector.pingOk ? 'success' : 'danger'">
+              {{ detector.pingOk ? '正常' : '异常' }}
+            </span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Modbus温度采集</span>
             <span class="info-value" :class="detector.modbusOk ? 'success' : 'danger'">
               {{ detector.modbusOk ? '正常' : '异常' }}
             </span>
           </div>
           <div class="info-row">
-            <span class="info-label">最后收码时间</span>
-            <span class="info-value">{{ formatTime(detector.lastValidCodeTime || detector.lastReceiveTime) }}</span>
+            <span class="info-label">最后业务结果</span>
+            <span class="info-value">{{ formatTime(detector.lastBusinessResultTime || detector.lastValidCodeTime) }}</span>
           </div>
-          <div class="info-row">
-            <span class="info-label">平均间隔</span>
-            <span class="info-value">{{ (detector.recentAverageValidCodeIntervalMs || 0).toFixed(0) }}ms</span>
-          </div>
-          <div class="info-row">
+          <div class="info-row full">
             <span class="info-label">更新时间</span>
             <span class="info-value">{{ formatTime(detector.updatedTime) || detector.lastUpdateTime || '--' }}</span>
           </div>
         </div>
 
-        <!-- 历史告警记录 -->
         <div class="alarms-section">
           <div class="section-title">
             <span class="title-mark"></span>
             <span>历史告警记录</span>
-            <span v-if="historyTotal > 0" class="history-count">(共{{ historyTotal }}条)</span>
+            <span v-if="historyTotal > 0" class="history-count">（共{{ historyTotal }}条）</span>
             <button
                 v-if="historyTotal > historyAlarms.length"
                 class="load-more-btn"
@@ -120,46 +153,66 @@ import type { Alarm } from '@/types/alarm'
 const props = defineProps<{ detector: any | null }>()
 const emit = defineEmits<{ close: [] }>()
 
-// 历史告警数据
+// 鍘嗗彶鍛婅鏁版嵁
 const historyAlarms = ref<Alarm[]>([])
 const historyTotal = ref(0)
 const historyPage = ref(1)
 const loadingHistory = ref(false)
 const hasMore = ref(true)
 
-// 获取设备的自定义温度阈值
+// 鑾峰彇璁惧鐨勮嚜瀹氫箟娓╁害闃堝€?
 const getTempThreshold = (detector: any) => {
   return detector.customTempThreshold || { warning: 45, danger: 60 }
 }
 
-// 获取设备的自定义耗时阈值
-const getValueThreshold = (detector: any) => {
-  return detector.customThreshold || { warning: 70, danger: 90 }
-}
-
-// 获取状态文本
+// 鑾峰彇鐘舵€佹枃鏈?
 const getStatusText = () => {
   if (!props.detector) return '未知'
   return props.detector.statusText || '未知'
 }
 
-// 获取状态样式类
+// 鑾峰彇鐘舵€佹牱寮忕被
 const getStatusClass = computed(() => {
   if (!props.detector) return ''
   return props.detector.status || 'unknown'
 })
 
-// 获取数值样式类
-const getValueClass = computed(() => {
+const getTriggerHealthClass = computed(() => {
   if (!props.detector) return ''
-  const val = props.detector.displayValue
-  const threshold = getValueThreshold(props.detector)
-  if (val >= threshold.danger) return 'danger'
-  if (val >= threshold.warning) return 'warning'
+  const status = String(props.detector.triggerCycleHealthStatus || '')
+  if (status === 'Critical') return 'danger'
+  if (status === 'Warning') return 'warning'
+  if (status === 'Healthy') return 'success'
   return ''
 })
 
-// 获取温度样式类
+const formatPercent = (value: number | null | undefined) => {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '--'
+  return `${Number(value).toFixed(1)}%`
+}
+
+const formatMs = (value: number | null | undefined) => {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '--'
+  return `${Number(value).toFixed(0)}ms`
+}
+
+const formatCount = (value: number | null | undefined) => {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '--'
+  return Number(value).toLocaleString('zh-CN')
+}
+
+const formatCycleOffset = (value: number | null | undefined) => {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '--'
+  return `${Number(value)} 周期`
+}
+
+const formatTemperature = (value: number | null | undefined) => {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '--'
+  if (Number(value) === 0 && !props.detector?.modbusOk) return '--'
+  return `${Number(value).toFixed(1)}°C`
+}
+
+// 鑾峰彇娓╁害鏍峰紡绫?
 const getTempClass = computed(() => {
   if (!props.detector) return ''
   const temp = props.detector.temperature || 0
@@ -169,13 +222,13 @@ const getTempClass = computed(() => {
   return ''
 })
 
-// 获取告警级别样式类
+// 鑾峰彇鍛婅绾у埆鏍峰紡绫?
 const getAlarmLevelClass = (level: number) => {
   if (level >= 2) return 'danger'
   return 'warning'
 }
 
-// 获取告警类型文本
+// 鑾峰彇鍛婅绫诲瀷鏂囨湰
 const getAlarmTypeText = (type: number) => {
   const typeMap: Record<number, string> = {
     1: '超时',
@@ -186,7 +239,7 @@ const getAlarmTypeText = (type: number) => {
   return typeMap[type] || `类型${type}`
 }
 
-// 加载历史告警
+// 鍔犺浇鍘嗗彶鍛婅
 const loadHistoryAlarms = async (reset = true) => {
   if (!props.detector) return
 
@@ -216,29 +269,29 @@ const loadHistoryAlarms = async (reset = true) => {
       historyAlarms.value = [...historyAlarms.value, ...response.items]
     }
 
-    // 判断是否还有更多数据
+    // 鍒ゆ柇鏄惁杩樻湁鏇村鏁版嵁
     hasMore.value = historyAlarms.value.length < historyTotal.value
 
     if (response.items.length > 0) {
       historyPage.value++
     }
   } catch (error) {
-    console.error('加载历史告警失败:', error)
+    console.error('鍔犺浇鍘嗗彶鍛婅澶辫触:', error)
   } finally {
     loadingHistory.value = false
   }
 }
 
-// 加载更多
+// 鍔犺浇鏇村
 const loadMoreHistory = () => {
   if (!loadingHistory.value && hasMore.value) {
     loadHistoryAlarms(false)
   }
 }
 
-// 关闭弹窗
+// 鍏抽棴寮圭獥
 const handleClose = () => {
-  // 重置状态
+  // 閲嶇疆鐘舵€?
   historyAlarms.value = []
   historyTotal.value = 0
   historyPage.value = 1
@@ -246,7 +299,7 @@ const handleClose = () => {
   emit('close')
 }
 
-// 格式化时间
+// 鏍煎紡鍖栨椂闂?
 const formatTime = (timeStr: string | undefined | null) => {
   if (!timeStr) return '--'
 
@@ -278,7 +331,7 @@ const formatTime = (timeStr: string | undefined | null) => {
   }
 }
 
-// 监听 detector 变化，加载历史告警
+// 鐩戝惉 detector 鍙樺寲锛屽姞杞藉巻鍙插憡璀?
 watch(() => props.detector, (newDetector) => {
   if (newDetector) {
     loadHistoryAlarms()
@@ -305,10 +358,11 @@ watch(() => props.detector, (newDetector) => {
 }
 
 .modal-container {
+  position: relative;
   background: var(--bg-card);
   border-radius: 16px;
   width: 90%;
-  max-width: 650px;
+  max-width: 920px;
   max-height: 85vh;
   overflow-y: auto;
   box-shadow: var(--shadow-lg);
@@ -352,11 +406,22 @@ watch(() => props.detector, (newDetector) => {
 }
 
 .close-button {
-  background: none;
-  border: none;
-  font-size: 36px;
+  position: sticky;
+  top: 0;
+  right: 0;
+  z-index: 5;
+  width: 54px;
+  height: 54px;
+  margin-top: -6px;
+  margin-right: -8px;
+  border: 1px solid var(--border-medium);
+  border-radius: 12px;
+  background: var(--bg-secondary);
+  box-shadow: var(--shadow-sm);
+  font-size: 42px;
+  font-weight: 300;
   cursor: pointer;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   padding: 0;
   line-height: 1;
   transition: var(--transition);
@@ -371,19 +436,28 @@ watch(() => props.detector, (newDetector) => {
 }
 
 .summary-section {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: stretch;
+  gap: 16px;
   margin-bottom: 24px;
-  padding-bottom: 20px;
-  border-bottom: 1px solid var(--border-light);
+  padding: 16px;
+  border: 1px solid var(--border-light);
+  border-radius: 12px;
+  background:
+      linear-gradient(135deg, rgba(47, 111, 237, 0.08), rgba(45, 106, 79, 0.05)),
+      var(--bg-secondary);
 }
 
 .status-badge {
-  padding: 6px 16px;
-  border-radius: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 92px;
+  padding: 8px 16px;
+  border-radius: 10px;
   font-size: 18px;
-  font-weight: 600;
+  font-weight: 800;
 }
 
 .status-badge.unknown {
@@ -416,30 +490,39 @@ watch(() => props.detector, (newDetector) => {
 }
 
 .summary-stats {
-  display: flex;
-  gap: 24px;
+  display: grid;
+  grid-template-columns: 1.15fr 1fr 1fr;
+  gap: 12px;
 }
 
 .summary-item {
-  text-align: right;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(63, 175, 255, 0.14);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  text-align: left;
 }
 
 .summary-label {
   display: block;
-  font-size: 14px;
-  color: var(--text-muted);
-  margin-bottom: 4px;
+  font-size: 15px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+  font-weight: 800;
 }
 
 .summary-value {
-  font-size: 26px;
-  font-weight: 700;
-  font-family: monospace;
+  font-size: 36px;
+  font-weight: 900;
+  font-family: 'SF Mono', 'JetBrains Mono', monospace;
   color: var(--text-primary);
+  line-height: 1;
 }
 
 .summary-value.danger { color: var(--danger); }
 .summary-value.warning { color: var(--warning); }
+.summary-value.success { color: var(--success); }
 
 .info-grid {
   display: grid;
@@ -448,28 +531,51 @@ watch(() => props.detector, (newDetector) => {
   margin-bottom: 24px;
 }
 
+.realtime-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
 .info-row {
+  min-width: 0;
   display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  padding: 6px 0;
-  border-bottom: 1px solid var(--border-light);
+  flex-direction: column;
+  gap: 6px;
+  justify-content: center;
+  padding: 10px 12px;
+  border: 1px solid var(--border-light);
+  border-radius: 9px;
+  background: var(--bg-secondary);
+}
+
+.info-row.important {
+  border-color: rgba(47, 111, 237, 0.18);
+  background: rgba(47, 111, 237, 0.06);
+}
+
+.info-row.full {
+  grid-column: span 2;
 }
 
 .info-label {
   font-size: 14px;
   color: var(--text-muted);
+  font-weight: 800;
 }
 
 .info-value {
-  font-size: 16px;
-  font-weight: 500;
+  overflow: hidden;
+  font-size: 17px;
+  font-weight: 800;
   color: var(--text-primary);
-  font-family: monospace;
+  font-family: 'SF Mono', 'JetBrains Mono', monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .info-value.success { color: var(--success); }
 .info-value.danger { color: var(--danger); }
+.info-value.warning { color: var(--warning); }
 .info-value.code {
   max-width: 150px;
   overflow: hidden;

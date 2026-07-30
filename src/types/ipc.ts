@@ -24,7 +24,7 @@ export interface IpcStatus {
     diskTotalGb: number
     diskUsagePercent: number
     localDatabaseOk: boolean
-    healthStatus: number
+    healthStatus: number | 'Healthy' | 'Warning' | 'Critical' | string
     message: string
 }
 
@@ -54,7 +54,7 @@ export interface IpcHistoryItem {
     diskTotalGb: number
     diskUsagePercent: number
     localDatabaseOk: boolean
-    healthStatus: number
+    healthStatus: number | 'Healthy' | 'Warning' | 'Critical' | string
     message: string
 }
 

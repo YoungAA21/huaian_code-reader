@@ -1,9 +1,11 @@
 // 生产状态
+export type RunState = 'Unknown' | 'Stopped' | 'Running' | 'LowSpeed' | 'Fault'
+
 export interface ProductionStatus {
     workshopId: string
     lineId: string
     ipcId: string
-    runState: number        // 运行状态：0-未知，1-停车，2-运行中，3-慢车，4-故障
+    runState: RunState      // 运行状态：Unknown、Stopped、Running、LowSpeed、Fault
     speed: number           // 速度
     ioStatusBits: number    // IO状态位
     ioSignals: boolean[]    // IO信号列表
@@ -13,12 +15,12 @@ export interface ProductionStatus {
 }
 
 // 运行状态映射
-export const RunStateMap: Record<number, { text: string; color: string; icon: string }> = {
-    0: { text: '未知状态', color: 'idle', icon: '?' },
-    1: { text: '停车', color: 'idle', icon: '■' },
-    2: { text: '运行中', color: 'success', icon: '▶' },
-    3: { text: '慢车', color: 'warning', icon: '◐' },
-    4: { text: '故障', color: 'danger', icon: '!' },
+export const RunStateMap: Record<RunState, { text: string; color: string; icon: string }> = {
+    Unknown: { text: '未知状态', color: 'idle', icon: '?' },
+    Stopped: { text: '停车', color: 'idle', icon: '■' },
+    Running: { text: '运行中', color: 'success', icon: '▶' },
+    LowSpeed: { text: '慢车', color: 'warning', icon: '◐' },
+    Fault: { text: '故障', color: 'danger', icon: '!' },
 }
 
 export interface ProductionSnapshot {
@@ -27,7 +29,7 @@ export interface ProductionSnapshot {
     lineId: string
     ipcId: string
     time: string
-    runState: number
+    runState: RunState
     speed: number
     ioStatusBits: number
     ioSignals: boolean[]

@@ -204,9 +204,10 @@ const getDiskClass = (disk: number) => {
 }
 
 // 健康状态类
-const getHealthClass = (health: number) => {
-  if (health === 1) return 'success'
-  if (health === 2) return 'warning'
+const getHealthClass = (health: number | string) => {
+  const normalized = String(health).toLowerCase()
+  if (health === 1 || normalized === 'healthy' || normalized === 'success') return 'success'
+  if (health === 2 || normalized === 'warning') return 'warning'
   return 'danger'
 }
 

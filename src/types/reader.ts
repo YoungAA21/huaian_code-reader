@@ -17,13 +17,13 @@ export interface ReaderStatus {
     lastBusinessResultTime: string | null
     lastValidCodeTime: string | null
     lastHeartbeatTime: string | null
-    lastReceiveType: number
+    lastReceiveType: number | string
     lastRawText: string | null
     lastValidCodeIntervalMs: number | null
     recentAverageValidCodeIntervalMs: number | null
     recentIntervalCount: number
     currentTemperature: number | null
-    status: number  // 0-未知，1-离线，2-连接中，3-在线，4-警告，5-故障，6-维护
+    status: number | string
     message: string
     updatedTime: string
 }
@@ -63,7 +63,7 @@ export interface ReaderSnapshot {
     pingOk: boolean
     modbusOk: boolean
     currentTemperature: number | null
-    lastReceiveType: number
+    lastReceiveType: number | string
     lastRawText: string | null
     lastReceiveTime: string | null
     lastBusinessResultTime: string | null

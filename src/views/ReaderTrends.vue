@@ -2,8 +2,7 @@
   <main class="trend-page">
     <header class="page-header">
       <div>
-        <p class="eyebrow">读码器趋势对比</p>
-        <h1>温度、解码耗时与车速</h1>
+        <h1>读码器运行状态对比</h1>
       </div>
       <RouterLink class="back-link" to="/">返回监控大屏</RouterLink>
     </header>
@@ -58,8 +57,10 @@
           :points="snapshots[readerId] || []"
           :alarms="alarms[readerId] || []"
           :production-points="productionSnapshots"
-          :range-start="startTime"
-          :range-end="endTime"
+          :range-start="queriedStartTime"
+          :range-end="queriedEndTime"
+          :temperature-range="sharedTemperatureRange"
+          :decode-range="sharedDecodeRange"
       />
     </section>
   </main>
@@ -79,6 +80,11 @@ interface ReaderGroup {
   key: string
   label: string
   readerIds: [string, string]
+}
+
+interface NumericRange {
+  min: number
+  max: number
 }
 
 const readerGroups: ReaderGroup[] = [
@@ -107,8 +113,8 @@ const formatInputDate = (date: Date) => {
 
 const startTimeInput = ref(formatInputDate(tenMinutesAgo))
 const endTimeInput = ref(formatInputDate(now))
-const startTime = computed(() => new Date(startTimeInput.value))
-const endTime = computed(() => new Date(endTimeInput.value))
+const queriedStartTime = ref(new Date(tenMinutesAgo))
+const queriedEndTime = ref(new Date(now))
 
 readerGroups.flatMap(group => group.readerIds).forEach((readerId) => {
   snapshots[readerId] = []
@@ -118,6 +124,66 @@ readerGroups.flatMap(group => group.readerIds).forEach((readerId) => {
 const activeGroup = computed(() => {
   return readerGroups.find(group => group.key === activeGroupKey.value) || readerGroups[0]
 })
+
+const ensureMinRangeSpan = (range: NumericRange, minSpan: number): NumericRange => {
+  const span = range.max - range.min
+  if (span >= minSpan) return range
+
+  const middle = (range.min + range.max) / 2
+  return {
+    min: middle - minSpan / 2,
+    max: middle + minSpan / 2
+  }
+}
+
+const getRange = (values: number[], minSpan: number): NumericRange => {
+  if (values.length === 0) return { min: 0, max: minSpan }
+
+  const min = Math.min(...values)
+  const max = Math.max(...values)
+  if (min === max) {
+    return ensureMinRangeSpan({ min, max }, minSpan)
+  }
+
+  const padding = Math.max((max - min) * 0.12, minSpan * 0.08)
+  return ensureMinRangeSpan({ min: min - padding, max: max + padding }, minSpan)
+}
+
+const getVisibleRange = (values: number[], minSpan: number): NumericRange => {
+  if (values.length < 20) return getRange(values, minSpan)
+
+  const sorted = [...values].sort((a, b) => a - b)
+  const actualMin = sorted[0]
+  const actualMax = sorted[sorted.length - 1]
+  const lowIndex = Math.floor((sorted.length - 1) * 0.02)
+  const highIndex = Math.ceil((sorted.length - 1) * 0.98)
+  const visibleMin = sorted[lowIndex]
+  const visibleMax = sorted[highIndex]
+
+  if (visibleMin === visibleMax) return getRange(values, minSpan)
+
+  const padding = Math.max((visibleMax - visibleMin) * 0.18, minSpan * 0.08)
+  return ensureMinRangeSpan({
+    min: Math.max(actualMin, visibleMin - padding),
+    max: Math.min(actualMax, visibleMax + padding)
+  }, minSpan)
+}
+
+const activeGroupSnapshots = computed(() => activeGroup.value.readerIds.flatMap(readerId => snapshots[readerId] || []))
+
+const sharedTemperatureRange = computed(() => getVisibleRange(
+  activeGroupSnapshots.value
+    .map(item => item.currentTemperature)
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value)),
+  1
+))
+
+const sharedDecodeRange = computed(() => getVisibleRange(
+  activeGroupSnapshots.value
+    .map(item => item.lastValidCodeIntervalMs)
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value)),
+  10
+))
 
 const toApiTime = (date: Date) => {
   const pad = (value: number) => String(value).padStart(2, '0')
@@ -167,9 +233,14 @@ const fetchReaderAlarms = async (
   return items
 }
 
-const fetchReader = async (readerId: string, sequence: number) => {
-  const startTimeFrom = toApiTime(startTime.value)
-  const startTimeTo = toApiTime(endTime.value)
+const fetchReader = async (
+    readerId: string,
+    sequence: number,
+    queryStartTime: Date,
+    queryEndTime: Date
+) => {
+  const startTimeFrom = toApiTime(queryStartTime)
+  const startTimeTo = toApiTime(queryEndTime)
 
   const [snapshotResponse, alarmItems] = await Promise.all([
     readerApi.getReaderRecentSnapshots({
@@ -186,12 +257,15 @@ const fetchReader = async (readerId: string, sequence: number) => {
 }
 
 const fetchActiveGroup = async () => {
-  if (!Number.isFinite(startTime.value.getTime()) || !Number.isFinite(endTime.value.getTime())) {
+  const queryStartTime = new Date(startTimeInput.value)
+  const queryEndTime = new Date(endTimeInput.value)
+
+  if (!Number.isFinite(queryStartTime.getTime()) || !Number.isFinite(queryEndTime.getTime())) {
     errorMessage.value = '请选择有效的开始和结束时间'
     return
   }
 
-  if (startTime.value.getTime() > endTime.value.getTime()) {
+  if (queryStartTime.getTime() > queryEndTime.getTime()) {
     errorMessage.value = '开始时间不能晚于结束时间'
     return
   }
@@ -199,8 +273,8 @@ const fetchActiveGroup = async () => {
   loading.value = true
   errorMessage.value = ''
   const sequence = ++requestSequence
-  const startTimeFrom = toApiTime(startTime.value)
-  const startTimeTo = toApiTime(endTime.value)
+  const startTimeFrom = toApiTime(queryStartTime)
+  const startTimeTo = toApiTime(queryEndTime)
 
   try {
     const [productionResponse] = await Promise.all([
@@ -209,10 +283,14 @@ const fetchActiveGroup = async () => {
         endTime: startTimeTo,
         limit: 10000
       }),
-      ...activeGroup.value.readerIds.map(readerId => fetchReader(readerId, sequence))
+      ...activeGroup.value.readerIds.map(readerId =>
+          fetchReader(readerId, sequence, queryStartTime, queryEndTime)
+      )
     ])
 
     if (sequence !== requestSequence) return
+    queriedStartTime.value = queryStartTime
+    queriedEndTime.value = queryEndTime
     productionSnapshots.value = productionResponse.items || []
   } catch (error) {
     if (sequence !== requestSequence) return
@@ -395,4 +473,3 @@ onMounted(fetchActiveGroup)
   }
 }
 </style>
-

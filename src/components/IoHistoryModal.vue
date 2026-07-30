@@ -45,35 +45,6 @@
         </div>
       </div>
 
-      <div class="chart-panel">
-        <div v-if="loading" class="chart-empty">正在加载历史数据...</div>
-        <div v-else-if="chartPoints.length === 0" class="chart-empty">所选时间范围暂无快照数据</div>
-        <svg v-else viewBox="0 0 900 300" class="io-chart" role="img">
-          <rect x="72" y="42" width="782" height="90" class="on-zone" />
-          <rect x="72" y="168" width="782" height="90" class="off-zone" />
-
-          <line x1="72" y1="87" x2="854" y2="87" class="state-grid on" />
-          <line x1="72" y1="213" x2="854" y2="213" class="state-grid off" />
-          <line x1="72" y1="258" x2="854" y2="258" class="axis-line" />
-
-          <text x="55" y="92" text-anchor="end" class="state-label on">ON</text>
-          <text x="55" y="218" text-anchor="end" class="state-label off">OFF</text>
-
-          <path :d="stepPath" class="state-path-shadow" />
-          <path :d="stepPath" class="state-path" />
-
-          <g v-for="change in changePoints" :key="change.key">
-            <line :x1="change.x" y1="42" :x2="change.x" y2="258" class="change-line" />
-            <circle :cx="change.x" :cy="change.y" r="6" :class="change.active ? 'change-dot on' : 'change-dot off'">
-              <title>{{ change.tooltip }}</title>
-            </circle>
-          </g>
-
-          <text x="72" y="284" class="time-label">{{ firstTimeLabel }}</text>
-          <text x="854" y="284" text-anchor="end" class="time-label">{{ lastTimeLabel }}</text>
-        </svg>
-      </div>
-
       <div v-if="changePoints.length > 0" class="change-list">
         <div class="change-list-head">
           <strong>状态变化记录</strong>
@@ -119,8 +90,6 @@ interface IoChartPoint {
   timestamp: number
   time: string
   active: boolean
-  x: number
-  y: number
 }
 
 const loading = ref(false)
@@ -128,6 +97,8 @@ const errorMessage = ref('')
 const snapshots = ref<ProductionSnapshot[]>([])
 const startTimeInput = ref('')
 const endTimeInput = ref('')
+const appliedStartTime = ref<Date | null>(null)
+const appliedEndTime = ref<Date | null>(null)
 
 const formatInputDate = (date: Date) => {
   const pad = (value: number) => String(value).padStart(2, '0')
@@ -168,31 +139,15 @@ const chartPoints = computed<IoChartPoint[]>(() => {
 
   if (ordered.length === 0) return []
 
-  const first = ordered[0].timestamp
-  const last = ordered[ordered.length - 1].timestamp
-  const duration = Math.max(last - first, 1)
-
   return ordered.map(({ snapshot, timestamp }) => {
     const active = getSignalValue(snapshot, props.point!.point)
     return {
       id: snapshot.id,
       timestamp,
       time: snapshot.time,
-      active,
-      x: 72 + ((timestamp - first) / duration) * 782,
-      y: active ? 87 : 213
+      active
     }
   })
-})
-
-const stepPath = computed(() => {
-  const points = chartPoints.value
-  if (points.length === 0) return ''
-
-  return points.slice(1).reduce(
-      (path, point) => `${path} H ${point.x} V ${point.y}`,
-      `M ${points[0].x} ${points[0].y}`
-  )
 })
 
 const changePoints = computed(() => chartPoints.value
@@ -210,16 +165,6 @@ const onRatio = computed(() => {
   if (chartPoints.value.length === 0) return '--'
   const onCount = chartPoints.value.filter(point => point.active).length
   return `${((onCount / chartPoints.value.length) * 100).toFixed(1)}%`
-})
-
-const firstTimeLabel = computed(() => {
-  const point = chartPoints.value[0]
-  return point ? new Date(point.time).toLocaleString('zh-CN', { hour12: false }) : ''
-})
-
-const lastTimeLabel = computed(() => {
-  const point = chartPoints.value.at(-1)
-  return point ? new Date(point.time).toLocaleString('zh-CN', { hour12: false }) : ''
 })
 
 const loadHistory = async () => {
@@ -244,6 +189,8 @@ const loadHistory = async () => {
       endTime: endTimeInput.value,
       limit: 10000
     })
+    appliedStartTime.value = start
+    appliedEndTime.value = end
     snapshots.value = response.items || []
   } catch (error) {
     console.error(`查询 IO 点位 ${props.point.point} 历史失败:`, error)
@@ -259,6 +206,8 @@ watch(
     ([visible]) => {
       if (!visible || !props.point) return
       snapshots.value = []
+      appliedStartTime.value = null
+      appliedEndTime.value = null
       resetTimeRange()
       loadHistory()
     }
@@ -426,109 +375,6 @@ watch(
   color: var(--danger);
 }
 
-.chart-panel {
-  min-height: 330px;
-  padding: 14px;
-  border: 1px solid var(--border-light);
-  border-radius: 10px;
-  background: var(--bg-card);
-}
-
-.chart-empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 300px;
-  color: var(--text-muted);
-}
-
-.io-chart {
-  display: block;
-  width: 100%;
-  min-width: 700px;
-}
-
-.on-zone {
-  fill: rgba(45, 106, 79, 0.07);
-}
-
-.off-zone {
-  fill: rgba(220, 53, 69, 0.05);
-}
-
-.state-grid {
-  stroke-width: 1.5;
-  stroke-dasharray: 5 5;
-}
-
-.state-grid.on {
-  stroke: rgba(45, 106, 79, 0.5);
-}
-
-.state-grid.off {
-  stroke: rgba(220, 53, 69, 0.45);
-}
-
-.axis-line {
-  stroke: var(--border-medium);
-}
-
-.state-label,
-.time-label {
-  fill: var(--text-muted);
-  font-family: 'SF Mono', 'JetBrains Mono', monospace;
-  font-size: 12px;
-}
-
-.state-label {
-  font-size: 13px;
-  font-weight: 900;
-}
-
-.state-label.on {
-  fill: var(--success);
-}
-
-.state-label.off {
-  fill: var(--danger);
-}
-
-.state-path-shadow,
-.state-path {
-  fill: none;
-  stroke-linejoin: round;
-}
-
-.state-path-shadow {
-  stroke: var(--bg-card);
-  stroke-width: 8;
-}
-
-.state-path {
-  stroke: var(--primary);
-  stroke-width: 4;
-}
-
-.change-line {
-  stroke: var(--warning);
-  stroke-width: 1;
-  stroke-dasharray: 3 4;
-  opacity: 0.7;
-}
-
-.change-dot {
-  stroke: var(--bg-card);
-  stroke-width: 3;
-}
-
-.change-dot.on {
-  fill: var(--success);
-}
-
-.change-dot.off {
-  fill: var(--danger);
-}
-
 .change-list {
   margin-top: 14px;
   padding: 14px;
@@ -598,10 +444,6 @@ watch(
   .summary-grid {
     align-items: stretch;
     flex-direction: column;
-  }
-
-  .chart-panel {
-    overflow-x: auto;
   }
 
   .change-items {

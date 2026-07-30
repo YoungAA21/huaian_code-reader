@@ -15,7 +15,10 @@
             </option>
           </select>
         </div>
-        <RouterLink class="trend-entry" to="/reader-trends">趋势对比</RouterLink>
+        <nav class="page-nav" aria-label="页面导航">
+          <RouterLink class="trend-entry" to="/reader-trends">趋势对比</RouterLink>
+          <RouterLink class="trend-entry secondary" to="/spare-parts">备件管理</RouterLink>
+        </nav>
         <ThemeToggle />
         <div class="datetime-area">
           <div class="time">{{ currentTime }}</div>
@@ -259,6 +262,22 @@ const formatTime = (timeStr: string) => {
   background: var(--primary-soft);
   color: var(--primary);
   box-shadow: var(--shadow-md);
+}
+
+.page-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.trend-entry.secondary {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.trend-entry.secondary:hover {
+  background: var(--primary);
+  color: var(--text-inverse);
 }
 
 .fullscreen-toggle:hover {

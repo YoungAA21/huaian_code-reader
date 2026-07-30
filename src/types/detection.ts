@@ -85,11 +85,29 @@ export interface Detector {
     recentIntervalCount?: number
     lastValidCodeIntervalMs?: number | null
     recentAverageValidCodeIntervalMs?: number | null
+    triggerCycleHealthStatus?: string
+    triggerCycleHealthReasons?: string[]
+    triggerSuccessRate?: number | null
+    triggerEffectiveSuccessRate?: number | null
+    triggerLateRecoveredRate?: number | null
+    triggerLateRecoveredCount?: number
+    triggerLastSuccessDelayMs?: number | null
+    triggerLastReceiveIntervalMs?: number | null
+    triggerLastIntervalMs?: number | null
+    triggerCount?: number
+    triggerMatchedCount?: number
+    triggerSettledCycleCount?: number
+    triggerPendingCount?: number
+    triggerPendingNoResultCount?: number
+    triggerConsecutiveNoResultCount?: number
+    triggerConsecutiveBadCycleCount?: number
+    triggerLastLateOffsetCycles?: number | null
+    triggerLastCycleStatus?: string | null
 
     // 码值相关
     lastCode: string
     lastRawText?: string | null
-    lastReceiveType?: number
+    lastReceiveType?: number | string
 
     // 网络连接信息
     ip?: string

@@ -7,11 +7,10 @@
       </div>
       <div class="legend">
         <span><i class="temp"></i>温度</span>
-        <span><i class="decode"></i>解码耗时</span>
-        <span><i class="speed"></i>车速</span>
+        <span><i class="decode"></i>发码间隔</span>
         <span><i class="speed-stop"></i>停车</span>
-        <span><i class="speed-slow"></i>慢车</span>
-        <span><i class="speed-normal"></i>正常</span>
+        <span><i class="speed-slow"></i>低速</span>
+        <span><i class="speed-normal"></i>高速</span>
         <span><i class="alarm"></i>告警 {{ alarmMarkers.length }}</span>
       </div>
     </div>
@@ -53,7 +52,7 @@
           x="48"
           :y="tick.y + 4"
           text-anchor="end"
-          class="axis-label"
+          class="axis-label left-axis-label"
       >{{ tick.temp }}</text>
       <text
           v-for="tick in yTicks"
@@ -109,7 +108,6 @@
         />
       </g>
 
-      <text x="58" y="306" class="time-label">{{ firstTimeLabel }}</text>
       <text
           v-for="tick in xTicks"
           :key="`label-${tick.x}`"
@@ -118,7 +116,6 @@
           text-anchor="middle"
           class="time-label"
       >{{ tick.label }}</text>
-      <text :x="chartRight" y="306" text-anchor="end" class="time-label">{{ lastTimeLabel }}</text>
       <text x="58" y="16" class="axis-title">℃</text>
       </svg>
       </div>
@@ -132,6 +129,18 @@
             :style="{ top: `${tick.y - 8}px` }"
         >
           {{ tick.right }}
+        </span>
+      </div>
+
+      <div class="fixed-left-axis" aria-hidden="true">
+        <span class="fixed-axis-title left">℃</span>
+        <span
+            v-for="tick in yTicks"
+            :key="`fixed-left-${tick.y}`"
+            class="fixed-axis-label left"
+            :style="{ top: `${tick.y - 8}px` }"
+        >
+          {{ tick.temp }}
         </span>
       </div>
 
@@ -151,12 +160,6 @@
         <time>{{ hoveredAlarm.timeText }}</time>
         <p>{{ hoveredAlarm.message }}</p>
       </div>
-    </div>
-
-    <div class="summary-row">
-      <span>温度 {{ tempSummary }}</span>
-      <span>耗时 {{ decodeSummary }}</span>
-      <span>车速 {{ speedSummary }}</span>
     </div>
 
     <div v-if="alarmMarkers.length > 0" class="alarm-panel">
@@ -194,6 +197,11 @@ import type { ReaderSnapshot } from '@/types/reader'
 import type { Alarm } from '@/types/alarm'
 import type { ProductionSnapshot } from '@/types/production'
 
+type NumericRange = {
+  min: number
+  max: number
+}
+
 const props = defineProps<{
   readerId: string
   points: ReaderSnapshot[]
@@ -201,6 +209,8 @@ const props = defineProps<{
   productionPoints: ProductionSnapshot[]
   rangeStart: Date
   rangeEnd: Date
+  temperatureRange: NumericRange
+  decodeRange: NumericRange
 }>()
 
 type AlarmMarker = {
@@ -274,6 +284,7 @@ const durationSeconds = computed(() => {
 
 const chartRight = computed(() => chart.left + Math.ceil(durationSeconds.value / secondsPerUnit) * pxPerUnit)
 const chartWidth = computed(() => chartRight.value + rightPadding)
+const maxTimeLabelCount = computed(() => Math.max(3, Math.floor((chartWidth.value - chart.left - rightPadding) / 110)))
 
 const orderedPoints = computed(() => {
   return [...props.points].sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
@@ -285,52 +296,20 @@ const orderedProductionPoints = computed(() => {
 
 const pointCount = computed(() => orderedPoints.value.length)
 
-const temperatures = computed(() => orderedPoints.value
-    .map(item => item.currentTemperature)
-    .filter((value): value is number => typeof value === 'number'))
-
-const decodeTimes = computed(() => orderedPoints.value
-    .map(item => item.lastValidCodeIntervalMs)
-    .filter((value): value is number => typeof value === 'number'))
-
-const speeds = computed(() => orderedProductionPoints.value
-    .map(item => item.speed)
-    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value)))
-
-const getRange = (values: number[]) => {
-  if (values.length === 0) return { min: 0, max: 1 }
-  const min = Math.min(...values)
-  const max = Math.max(...values)
-  if (min === max) {
-    const offset = Math.max(Math.abs(min) * 0.1, 1)
-    return { min: min - offset, max: max + offset }
+const normalizeRange = (range: NumericRange, fallback: NumericRange) => {
+  if (
+      Number.isFinite(range.min) &&
+      Number.isFinite(range.max) &&
+      range.max > range.min
+  ) {
+    return range
   }
-  const padding = (max - min) * 0.12
-  return { min: min - padding, max: max + padding }
+
+  return fallback
 }
 
-const getVisibleRange = (values: number[]) => {
-  if (values.length < 20) return getRange(values)
-
-  const sorted = [...values].sort((a, b) => a - b)
-  const actualMin = sorted[0]
-  const actualMax = sorted[sorted.length - 1]
-  const lowIndex = Math.floor((sorted.length - 1) * 0.02)
-  const highIndex = Math.ceil((sorted.length - 1) * 0.98)
-  const visibleMin = sorted[lowIndex]
-  const visibleMax = sorted[highIndex]
-
-  if (visibleMin === visibleMax) return getRange(values)
-
-  const padding = Math.max((visibleMax - visibleMin) * 0.18, 1)
-  return {
-    min: Math.max(actualMin, visibleMin - padding),
-    max: Math.min(actualMax, visibleMax + padding)
-  }
-}
-
-const tempRange = computed(() => getVisibleRange(temperatures.value))
-const decodeRange = computed(() => getVisibleRange(decodeTimes.value))
+const tempRange = computed(() => normalizeRange(props.temperatureRange, { min: 0, max: 1 }))
+const decodeRange = computed(() => normalizeRange(props.decodeRange, { min: 0, max: 10 }))
 
 const scaleTimeX = (time: string) => {
   const start = props.rangeStart.getTime()
@@ -350,7 +329,8 @@ const alarmTypeMap: Record<number, string> = {
   8: '运行时长提醒',
   9: '心跳超时',
   10: 'TCP端口不可用',
-  11: 'TCP消息过长'
+  11: 'TCP消息过长',
+  201: '触发周期异常'
 }
 
 const alarmMarkers = computed(() => {
@@ -367,7 +347,7 @@ const alarmMarkers = computed(() => {
         }
 
         const x = chart.left + (((alarmTime - firstTime) / 1000) / secondsPerUnit) * pxPerUnit
-        const typeText = alarmTypeMap[alarm.type] || `鍛婅绫诲瀷 ${alarm.type}`
+        const typeText = alarmTypeMap[alarm.type] || `告警类型 ${alarm.type}`
         const timeText = new Date(alarm.startTime).toLocaleString('zh-CN', { hour12: false })
 
         return {
@@ -461,17 +441,22 @@ const xTicks = computed(() => {
       durationSeconds.value <= 600 ? 10 :
       60
 
-  return Array.from({ length: Math.floor(durationSeconds.value / stepSeconds) + 1 }, (_, index) => {
+  const tickCount = Math.floor(durationSeconds.value / stepSeconds) + 1
+  const labelEvery = Math.max(1, Math.ceil(tickCount / maxTimeLabelCount.value))
+
+  return Array.from({ length: tickCount }, (_, index) => {
     const seconds = index * stepSeconds
     const time = new Date(props.rangeStart.getTime() + seconds * 1000)
     return {
       x: chart.left + (seconds / secondsPerUnit) * pxPerUnit,
-      label: time.toLocaleTimeString('zh-CN', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: stepSeconds <= 10 ? '2-digit' : undefined,
-        hour12: false
-      })
+      label: index % labelEvery === 0
+          ? time.toLocaleTimeString('zh-CN', {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: durationSeconds.value <= 120 ? '2-digit' : undefined,
+            hour12: false
+          })
+          : ''
     }
   })
 })
@@ -490,31 +475,6 @@ const yTicks = computed(() => {
   })
 })
 
-const formatTimeLabel = (value?: string) => {
-  if (!value) return ''
-  return new Date(value).toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  })
-}
-
-const firstTimeLabel = computed(() => formatTimeLabel(props.rangeStart.toISOString()))
-const lastTimeLabel = computed(() => formatTimeLabel(props.rangeEnd.toISOString()))
-
-const summarize = (values: number[], digits: number, unit: string) => {
-  if (values.length === 0) return '--'
-  const min = Math.min(...values)
-  const max = Math.max(...values)
-  const avg = values.reduce((sum, value) => sum + value, 0) / values.length
-  return `${avg.toFixed(digits)}${unit} / ${min.toFixed(digits)}-${max.toFixed(digits)}${unit}`
-}
-
-const tempSummary = computed(() => summarize(temperatures.value, 1, '℃'))
-const decodeSummary = computed(() => summarize(decodeTimes.value, 0, 'ms'))
-const speedSummary = computed(() => summarize(speeds.value, 0, ''))
 </script>
 
 <style scoped>
@@ -583,14 +543,17 @@ const speedSummary = computed(() => summarize(speeds.value, 0, ''))
 
 .legend .speed-stop {
   background: #94a3b8;
+  height: 9px;
 }
 
 .legend .speed-slow {
   background: #e6a017;
+  height: 9px;
 }
 
 .legend .speed-normal {
   background: #16a34a;
+  height: 9px;
 }
 
 .legend .alarm {
@@ -655,7 +618,8 @@ const speedSummary = computed(() => summarize(speeds.value, 0, ''))
   font-weight: 700;
 }
 
-.right-axis-label {
+.right-axis-label,
+.left-axis-label {
   display: none;
 }
 
@@ -764,6 +728,16 @@ const speedSummary = computed(() => summarize(speeds.value, 0, ''))
   background: linear-gradient(90deg, rgba(255, 255, 255, 0), var(--bg-card) 34%);
 }
 
+.fixed-left-axis {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 54px;
+  height: 276px;
+  pointer-events: none;
+  background: linear-gradient(90deg, var(--bg-card) 64%, rgba(255, 255, 255, 0));
+}
+
 .fixed-axis-title {
   position: absolute;
   top: 8px;
@@ -774,6 +748,11 @@ const speedSummary = computed(() => summarize(speeds.value, 0, ''))
   font-weight: 700;
 }
 
+.fixed-axis-title.left {
+  left: 0;
+  right: auto;
+}
+
 .fixed-axis-label {
   position: absolute;
   right: 0;
@@ -781,6 +760,11 @@ const speedSummary = computed(() => summarize(speeds.value, 0, ''))
   font-family: 'SF Mono', 'JetBrains Mono', monospace;
   font-size: 12px;
   line-height: 16px;
+}
+
+.fixed-axis-label.left {
+  left: 0;
+  right: auto;
 }
 
 .alarm-tooltip {
@@ -992,4 +976,3 @@ const speedSummary = computed(() => summarize(speeds.value, 0, ''))
   background: var(--bg-primary);
 }
 </style>
-

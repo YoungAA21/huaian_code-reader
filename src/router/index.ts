@@ -12,6 +12,11 @@ const routes = [
         name: 'ReaderTrends',
         component: () => import('../views/ReaderTrends.vue')
     },
+    {
+        path: '/spare-parts',
+        name: 'SpareParts',
+        component: () => import('../views/SparePartManagement.vue')
+    },
     // 如果以后有其他页面，可以继续添加
     // {
     //   path: '/about',

@@ -13,12 +13,12 @@ export default defineConfig({
     port: 3000,
     proxy: {
       '/hubs': {
-        target: 'http://localhost:5163',
+        target: 'http://192.168.31.220:5163',
         changeOrigin: true,
         ws: true,
       },
       '/api': {
-        target: 'http://localhost:5163',
+        target: 'http://192.168.31.220:5163',
         changeOrigin: true,
       },
     },

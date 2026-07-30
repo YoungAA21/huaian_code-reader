@@ -1,9 +1,10 @@
 <template>
   <router-view />
+  <AppDialog />
 </template>
 
 <script setup lang="ts">
-// App.vue 现在只作为路由出口
+import AppDialog from '@/components/AppDialog.vue'
 </script>
 
 <style>
