@@ -117,12 +117,12 @@
           <div class="update-time" @click="$emit('openDetail', detector)">{{ detector.lastUpdateTime || '--:--:--' }}</div>
         </div>
 
-        <!-- 閲嶅惎鎸夐挳 - 浠呭湪闇€瑕侀噸鍚彁閱掓椂鏄剧ず -->
+        <!-- 重启按钮 - 仅在需要重启提醒时显示 -->
         <div v-if="needsRestart(detector.id)" class="restart-area">
           <button class="restart-btn" @click.stop="openRestartConfirm(detector)">
-            馃攧 閲嶅惎璇荤爜鍣?
+            重启读码器
           </button>
-          <div class="restart-hint">杩愯鏃堕棿宸茶揪闃堝€硷紝寤鸿閲嶅惎</div>
+          <div class="restart-hint">运行时间已达阈值，建议重启</div>
         </div>
 
       </div>
@@ -139,7 +139,7 @@
     <div v-if="restartModalVisible" class="modal-overlay" @click="closeRestartConfirm">
       <div class="restart-modal" @click.stop>
         <div class="restart-modal-header">
-          <span class="modal-icon">馃攧</span>
+          <span class="modal-icon">!</span>
           <span>确认重启读码器</span>
           <button class="modal-close" @click="closeRestartConfirm">×</button>
         </div>
@@ -329,15 +329,15 @@ const confirmReplacement = async (detector: any) => {
     replacementLocationIds.value.add(result.status.locationId)
     replacementStatusMap.set(result.status.locationId, result.status)
     await appDialog.alert({
-      title: '鏇存崲澶囦欢',
+      title: '更换备件',
       message: result.message,
       type: 'success'
     })
   } catch (error: any) {
-    console.error('鏇存崲澶囦欢澶辫触:', error)
+    console.error('更换备件失败:', error)
     await appDialog.alert({
-      title: '鏇存崲澶辫触',
-      message: `鏇存崲澶囦欢澶辫触锛?{error.response?.data?.message || error.message || '鏈煡閿欒'}`,
+      title: '更换失败',
+      message: `更换备件失败：${error.response?.data?.message || error.message || '未知错误'}`,
       type: 'danger'
     })
   } finally {
@@ -444,7 +444,7 @@ const confirmRestart = async () => {
   try {
     const result = await runtimeApi.confirmRestart(restartTarget.value.id, {
       confirmedBy: confirmForm.confirmedBy,
-      remark: confirmForm.remark || '鎵嬪姩閲嶅惎'
+      remark: confirmForm.remark || '手动重启'
     })
 
     // 閲嶅惎鎴愬姛鍚庯紝浠庢彁閱掑垪琛ㄤ腑绉婚櫎
@@ -457,16 +457,16 @@ const confirmRestart = async () => {
     }
 
     await appDialog.alert({
-      title: '閲嶅惎纭瀹屾垚',
-      message: `閲嶅惎鎴愬姛锛?{result.message}`,
+      title: '重启确认完成',
+      message: `重启成功：${result.message}`,
       type: 'success'
     })
     closeRestartConfirm()
   } catch (error: any) {
-    console.error('閲嶅惎澶辫触:', error)
+    console.error('重启失败:', error)
     await appDialog.alert({
-      title: '閲嶅惎澶辫触',
-      message: `閲嶅惎澶辫触锛?{error.message || '鏈煡閿欒'}`,
+      title: '重启失败',
+      message: `重启失败：${error.message || '未知错误'}`,
       type: 'danger'
     })
   } finally {
