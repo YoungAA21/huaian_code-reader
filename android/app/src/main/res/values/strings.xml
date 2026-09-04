@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">读码器状态监测</string>
+    <string name="title_activity_main">读码器状态监测</string>
+    <string name="package_name">com.huaian.readermonitor</string>
+    <string name="custom_url_scheme">com.huaian.readermonitor</string>
+</resources>
